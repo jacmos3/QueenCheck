@@ -3,4 +3,4 @@
   export let data;
 </script>
 <svelte:head><title>Game · QueenCheck</title></svelte:head>
-<GameClient address={data.address} />
+{#key data.address}<GameClient address={data.address} />{/key}

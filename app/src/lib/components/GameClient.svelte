@@ -2,6 +2,7 @@
   import { env } from '$env/dynamic/public';
   import { Chess } from 'chess.js';
   import { getAddress } from 'viem';
+  import { onMount } from 'svelte';
   import ChessBoard from './ChessBoard.svelte';
   import WalletButton from './WalletButton.svelte';
   import { boardToFen, chessToSignedBoard, EMPTY_BOARD, indexToAlgebraic } from '$lib/board.js';
@@ -10,12 +11,14 @@
   import { moveTypedData, nextTranscriptRoot } from '$lib/eip712.js';
   import { loadTranscript, mergeTranscripts, parseTranscriptJson, saveTranscript, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '$lib/transcript.js';
   import { createDrawAgreement, drawAgreementTypedData, parseDrawAgreementJson, validateDrawAgreement, withDrawSignature } from '$lib/draw-agreement.js';
+  import { getPublicReadSession } from '$lib/public-client.js';
   import { assertSessionCurrent, waitForSuccessfulReceipt } from '$lib/wallet.js';
 
   export let address;
+  const publicReadSession = getPublicReadSession();
   let session = null;
   let verified = false;
-  let loading = false;
+  let loading = true;
   let busy = false;
   let error = '';
   let notice = '';
@@ -28,6 +31,7 @@
   let recordAddress = '';
   let canClaimThreefold = false;
   let sessionGeneration = 0;
+  let refreshGeneration = 0;
   let board = [...EMPTY_BOARD];
   let displayBoard = [...EMPTY_BOARD];
   let displayChess = null;
@@ -48,6 +52,14 @@
   $: isPlayer = session && [game.white, game.black].some((player) => player && player.toLowerCase() === session.account.toLowerCase());
   $: canCancelDraw = isPlayer && game.status === 1 && game.drawOfferer && game.drawOfferer.toLowerCase() === session.account.toLowerCase();
   $: canClaimFifty = isPlayer && game.status === 1 && game.halfmoveClock >= 100 && onchainPlayer && session.account.toLowerCase() === onchainPlayer.toLowerCase();
+
+  onMount(() => {
+    void refresh(null, sessionGeneration);
+    return () => {
+      refreshGeneration += 1;
+      sessionGeneration += 1;
+    };
+  });
 
   function friendly(cause) {
     if (!cause || typeof cause !== 'object') return 'Operation failed';
@@ -73,31 +85,39 @@
     sessionGeneration += 1;
     session = null;
     busy = false;
-    loading = false;
-    verified = false;
-    recordAddress = '';
     canClaimThreefold = false;
+    drawAgreement = null;
+    transcript = { schema: TRANSCRIPT_SCHEMA, chainId: publicReadSession.chainId, game: address, moves: [] };
     displayChess = null;
     selected = null;
+    void refresh(null, sessionGeneration);
   }
 
   async function refresh(snapshot = session, generation = sessionGeneration) {
-    if (!snapshot) return false;
+    const reader = snapshot ?? publicReadSession;
+    const request = ++refreshGeneration;
+    const isCurrent = () => request === refreshGeneration && (
+      !snapshot || (session === snapshot && sessionGeneration === generation)
+    );
     resetMessage(); loading = true; verified = false;
     try {
-      assertSessionCurrent(session, snapshot, sessionGeneration, generation);
-      const trustedDeployment = await assertTrustedDeployment(snapshot.publicClient, snapshot.chainId, env);
-      assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      if (snapshot) assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      const rpcChainId = Number(await reader.publicClient.getChainId());
+      if (rpcChainId !== Number(reader.chainId)) throw new Error('The read provider returned an unexpected network.');
+      if (!isCurrent()) return false;
+      const trustedDeployment = await assertTrustedDeployment(reader.publicClient, reader.chainId, env);
+      if (!isCurrent()) return false;
+      if (snapshot) assertSessionCurrent(session, snapshot, sessionGeneration, generation);
       const factoryAddress = trustedDeployment.factory;
       const [code, registered] = await Promise.all([
-        snapshot.publicClient.getCode({ address }),
-        snapshot.publicClient.readContract({ address: factoryAddress, abi: factoryAbi, functionName: 'isGame', args: [address] })
+        reader.publicClient.getCode({ address }),
+        reader.publicClient.readContract({ address: factoryAddress, abi: factoryAbi, functionName: 'isGame', args: [address] })
       ]);
       if (!code || code === '0x') throw new Error('No contract bytecode exists at this address.');
       if (!registered) throw new Error('This contract is not registered by the configured QueenCheck factory.');
       const normalizedRecord = trustedDeployment.record;
       const [white, black, status, whiteTurn, ply, gameId, rulesetId, stateHash, transcriptRoot, castlingFlags, enPassantCol, enPassantRow, halfmoveClock, moveTimeout, turnDeadline, timeoutFinalizeAfter, drawOfferer, rawBoard] = await Promise.all([
-        ...['whitePlayer', 'blackPlayer', 'status', 'whiteTurn', 'ply', 'gameId', 'rulesetId', 'stateHash', 'transcriptRoot', 'castlingFlags', 'enPassantCol', 'enPassantRow', 'halfmoveClock', 'moveTimeout', 'turnDeadline', 'timeoutFinalizeAfter', 'drawOfferer', 'getBoard'].map((functionName) => snapshot.publicClient.readContract({ address, abi: gameAbi, functionName }))
+        ...['whitePlayer', 'blackPlayer', 'status', 'whiteTurn', 'ply', 'gameId', 'rulesetId', 'stateHash', 'transcriptRoot', 'castlingFlags', 'enPassantCol', 'enPassantRow', 'halfmoveClock', 'moveTimeout', 'turnDeadline', 'timeoutFinalizeAfter', 'drawOfferer', 'getBoard'].map((functionName) => reader.publicClient.readContract({ address, abi: gameAbi, functionName }))
       ]);
       const nextGame = {
         white, black, status: Number(status), whiteTurn, ply: Number(ply), gameId: String(gameId),
@@ -107,30 +127,31 @@
         turnDeadline: Number(turnDeadline), timeoutFinalizeAfter: Number(timeoutFinalizeAfter), drawOfferer
       };
       let threefold = false;
-      const player = [white, black].some((candidate) => candidate && candidate.toLowerCase() === snapshot.account.toLowerCase());
+      const player = snapshot && [white, black].some((candidate) => candidate && candidate.toLowerCase() === snapshot.account.toLowerCase());
       if (Number(status) === 1 && player) {
         try {
-          await snapshot.publicClient.simulateContract({ address, abi: gameAbi, functionName: 'claimThreefold', account: snapshot.account });
+          await reader.publicClient.simulateContract({ address, abi: gameAbi, functionName: 'claimThreefold', account: snapshot.account });
           threefold = true;
         } catch { /* disabled unless the exact call currently succeeds */ }
       }
-      assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      if (!isCurrent()) return false;
+      if (snapshot) assertSessionCurrent(session, snapshot, sessionGeneration, generation);
       game = nextGame;
       board = [...rawBoard].map(Number);
       recordAddress = normalizedRecord;
       canClaimThreefold = threefold;
-      if (drawAgreement) {
+      if (snapshot && drawAgreement) {
         try { drawAgreement = validateDrawAgreement(drawAgreement, { chainId: snapshot.chainId, game: address, state: nextGame }); }
         catch { drawAgreement = null; }
-      }
+      } else if (!snapshot) drawAgreement = null;
       rebuildDisplayBoard();
       verified = true;
       return true;
     } catch (cause) {
-      if (session === snapshot && sessionGeneration === generation) error = friendly(cause);
+      if (isCurrent()) error = friendly(cause);
       return false;
     } finally {
-      if (session === snapshot && sessionGeneration === generation) loading = false;
+      if (isCurrent()) loading = false;
     }
   }
 
@@ -494,20 +515,26 @@
   {#if error}<p class="form-error status-box" role="alert">{error}</p>{/if}
   {#if notice}<p class="success status-box" role="status">{notice}</p>{/if}
   {#if verified}
+    {#if !session}<div class="spectator-banner" role="status"><span><strong>Verified spectator mode.</strong> This board and state were read from Base Sepolia without requesting wallet access.</span><button class="secondary" type="button" on:click={() => refresh(null, sessionGeneration)} disabled={loading}>Refresh state</button></div>{/if}
     <div class="game-grid">
-      <ChessBoard board={displayBoard} {selected} disabled={busy} onselect={selectSquare} />
+      <ChessBoard board={displayBoard} {selected} disabled={busy || !session} onselect={selectSquare} />
       <aside class="game-sidebar">
         <div class="panel compact"><div class="stat-row"><span>Status</span><strong>{statusLabels[game.status] ?? `State ${game.status}`}</strong></div><div class="stat-row"><span>Ply</span><strong>{game.ply}</strong></div><div class="stat-row"><span>White</span><code>{game.white}</code></div><div class="stat-row"><span>Black</span><code>{game.black}</code></div><div class="stat-row"><span>State hash</span><code>{game.stateHash}</code></div><div class="stat-row"><span>Transcript root</span><code>{game.transcriptRoot}</code></div></div>
-        <div class="panel compact">
-          <h2>Move mode</h2><div class="segmented"><button class:active={mode === 'live'} on:click={() => mode = 'live'}>Live</button><button class:active={mode === 'offline'} on:click={() => mode = 'offline'}>Offline</button></div>
-          <p>{mode === 'live' ? 'Each move is sent onchain immediately and updates the SVG.' : 'Moves are signed locally. Nothing is archived until checkpoint is submitted.'}</p>
-          <label>Promotion<select bind:value={promotion}><option value={5}>Queen</option><option value={4}>Rook</option><option value={3}>Bishop</option><option value={2}>Knight</option></select></label>
-        </div>
-        <div class="panel compact"><h2>Game actions</h2><div class="button-grid"><button on:click={() => sendWrite('join')} disabled={busy || game.status !== 0}>Join / accept</button><button class="secondary" on:click={() => sendWrite('cancel')} disabled={busy || game.status !== 0 || !session || game.white.toLowerCase() !== session.account.toLowerCase()}>Cancel</button><button class="secondary" on:click={() => sendWrite('resign')} disabled={busy || game.status !== 1 || !isPlayer}>Resign</button><button class="secondary" on:click={() => sendWrite('offerDraw')} disabled={busy || game.status !== 1 || !isPlayer}>Offer draw</button><button class="secondary" on:click={() => sendWrite('cancelDrawOffer')} disabled={busy || !canCancelDraw}>Cancel draw offer</button><button class="secondary" on:click={() => sendWrite('acceptDraw')} disabled={busy || game.status !== 1 || !isPlayer || !game.drawOfferer || game.drawOfferer.toLowerCase() === session.account.toLowerCase()}>Accept draw</button><button class="secondary" on:click={() => sendWrite('claimThreefold')} disabled={busy || !canClaimThreefold}>Claim threefold</button><button class="secondary" on:click={() => sendWrite('claimFiftyMove')} disabled={busy || !canClaimFifty}>Claim 50-move draw</button><button class="secondary" on:click={() => sendWrite('signalTimeout')} disabled={busy || game.status !== 1 || !isPlayer || !game.moveTimeout}>Signal timeout</button><button class="secondary" on:click={() => sendWrite('finalizeTimeout')} disabled={busy || !game.timeoutFinalizeAfter}>Finalize timeout</button></div>{#if game.moveTimeout}<p>Turn deadline: {new Date(game.turnDeadline * 1000).toLocaleString()}. {game.timeoutFinalizeAfter ? `Grace ends ${new Date(game.timeoutFinalizeAfter * 1000).toLocaleString()}.` : ''}</p>{/if}</div>
-        <div class="panel compact"><h2>Offline transcript <span class="count">{queued.length}</span></h2><p>Up to 16 signed moves per checkpoint. A different player/browser must import this file and add its own signature; QueenCheck does not claim automatic P2P sync.</p><div class="button-row"><button class="secondary" on:click={exportTranscript}>Export JSON</button><button on:click={checkpoint} disabled={!queued.length || busy}>Archive {Math.min(queued.length, 16)}</button></div><label>Import signed transcript<textarea bind:value={importText} maxlength="262144" rows="4" placeholder="Paste QueenCheck transcript JSON"></textarea></label><button class="secondary" on:click={importTranscript} disabled={!importText || !session}>Validate & import</button></div>
-        <div class="panel compact"><h2>Signed draw agreement <span class="count">{drawAgreement?.signatures.length ?? 0}/2</span></h2><p>Both players sign the exact current onchain state. Any move makes an old agreement unusable.</p><div class="button-row"><button class="secondary" on:click={signDrawAgreement} disabled={busy || !isPlayer || game.status !== 1 || queued.length}>Sign current state</button><button class="secondary" on:click={exportDrawAgreement} disabled={!session || game.status !== 1}>Export JSON</button><button on:click={submitDrawAgreement} disabled={busy || queued.length || (drawAgreement?.signatures.length ?? 0) !== 2}>Submit draw</button></div><label>Import signed draw agreement<textarea bind:value={drawImportText} maxlength="16384" rows="4" placeholder="Paste QueenCheck draw agreement JSON"></textarea></label><button class="secondary" on:click={importDrawAgreement} disabled={!drawImportText || !session || busy}>Validate & import</button></div>
-        <div class="panel compact record"><h2>Optional match record</h2><p>The record NFT mirrors the latest archived SVG. It is opt-in, soulbound, burnable, and grants no token, prize, revenue, governance, or other economic right. Its address is read from and verified against the configured factory.</p><button on:click={claimRecord} disabled={busy || !recordAddress || !isPlayer || game.status === 0}>Claim record</button></div>
+        {#if session}
+          <div class="panel compact">
+            <h2>Move mode</h2><div class="segmented"><button class:active={mode === 'live'} on:click={() => mode = 'live'}>Live</button><button class:active={mode === 'offline'} on:click={() => mode = 'offline'}>Offline</button></div>
+            <p>{mode === 'live' ? 'Each move is sent onchain immediately and updates the SVG.' : 'Moves are signed locally. Nothing is archived until checkpoint is submitted.'}</p>
+            <label>Promotion<select bind:value={promotion}><option value={5}>Queen</option><option value={4}>Rook</option><option value={3}>Bishop</option><option value={2}>Knight</option></select></label>
+          </div>
+          <div class="panel compact"><h2>Game actions</h2><div class="button-grid"><button on:click={() => sendWrite('join')} disabled={busy || game.status !== 0}>Join / accept</button><button class="secondary" on:click={() => sendWrite('cancel')} disabled={busy || game.status !== 0 || game.white.toLowerCase() !== session.account.toLowerCase()}>Cancel</button><button class="secondary" on:click={() => sendWrite('resign')} disabled={busy || game.status !== 1 || !isPlayer}>Resign</button><button class="secondary" on:click={() => sendWrite('offerDraw')} disabled={busy || game.status !== 1 || !isPlayer}>Offer draw</button><button class="secondary" on:click={() => sendWrite('cancelDrawOffer')} disabled={busy || !canCancelDraw}>Cancel draw offer</button><button class="secondary" on:click={() => sendWrite('acceptDraw')} disabled={busy || game.status !== 1 || !isPlayer || !game.drawOfferer || game.drawOfferer.toLowerCase() === session.account.toLowerCase()}>Accept draw</button><button class="secondary" on:click={() => sendWrite('claimThreefold')} disabled={busy || !canClaimThreefold}>Claim threefold</button><button class="secondary" on:click={() => sendWrite('claimFiftyMove')} disabled={busy || !canClaimFifty}>Claim 50-move draw</button><button class="secondary" on:click={() => sendWrite('signalTimeout')} disabled={busy || game.status !== 1 || !isPlayer || !game.moveTimeout}>Signal timeout</button><button class="secondary" on:click={() => sendWrite('finalizeTimeout')} disabled={busy || !game.timeoutFinalizeAfter}>Finalize timeout</button></div>{#if game.moveTimeout}<p>Turn deadline: {new Date(game.turnDeadline * 1000).toLocaleString()}. {game.timeoutFinalizeAfter ? `Grace ends ${new Date(game.timeoutFinalizeAfter * 1000).toLocaleString()}.` : ''}</p>{/if}</div>
+          <div class="panel compact"><h2>Offline transcript <span class="count">{queued.length}</span></h2><p>Up to 16 signed moves per checkpoint. A different player/browser must import this file and add its own signature; QueenCheck does not claim automatic P2P sync.</p><div class="button-row"><button class="secondary" on:click={exportTranscript}>Export JSON</button><button on:click={checkpoint} disabled={!queued.length || busy}>Archive {Math.min(queued.length, 16)}</button></div><label>Import signed transcript<textarea bind:value={importText} maxlength="262144" rows="4" placeholder="Paste QueenCheck transcript JSON"></textarea></label><button class="secondary" on:click={importTranscript} disabled={!importText}>Validate & import</button></div>
+          <div class="panel compact"><h2>Signed draw agreement <span class="count">{drawAgreement?.signatures.length ?? 0}/2</span></h2><p>Both players sign the exact current onchain state. Any move makes an old agreement unusable.</p><div class="button-row"><button class="secondary" on:click={signDrawAgreement} disabled={busy || !isPlayer || game.status !== 1 || queued.length}>Sign current state</button><button class="secondary" on:click={exportDrawAgreement} disabled={game.status !== 1}>Export JSON</button><button on:click={submitDrawAgreement} disabled={busy || queued.length || (drawAgreement?.signatures.length ?? 0) !== 2}>Submit draw</button></div><label>Import signed draw agreement<textarea bind:value={drawImportText} maxlength="16384" rows="4" placeholder="Paste QueenCheck draw agreement JSON"></textarea></label><button class="secondary" on:click={importDrawAgreement} disabled={!drawImportText || busy}>Validate & import</button></div>
+          <div class="panel compact record"><h2>Optional match record</h2><p>The record NFT mirrors the latest archived SVG. It is opt-in, soulbound, burnable, and grants no token, prize, revenue, governance, or other economic right. Its address is read from and verified against the configured factory.</p><button on:click={claimRecord} disabled={busy || !recordAddress || !isPlayer || game.status === 0}>Claim record</button></div>
+        {:else}
+          <div class="panel compact"><h2>Read-only view</h2><p>Connect only if you want to join this game or sign an action. Spectating never requests an account or signature.</p></div>
+          <div class="panel compact record"><h2>Optional match record</h2><p>Players can claim a soulbound, burnable record whose SVG follows the latest archived onchain position. It carries no financial rights.</p></div>
+        {/if}
       </aside>
     </div>
-  {:else if !session && !loading}<div class="panel"><h2>Connect a wallet to verify this game</h2><p>Only Base Sepolia (84532) and a local development chain (31337) are accepted. Mainnet is intentionally disabled.</p></div>{/if}
+  {/if}
 </section>
