@@ -17,7 +17,11 @@ import {
   assertRuntimeMatchesArtifact,
   loadProductionArtifacts,
 } from "../../scripts/production-artifacts.mjs";
-import { releaseFingerprint } from "../../scripts/release-fingerprint.mjs";
+import {
+  protocolFingerprint,
+  protocolFingerprintAtCommit,
+  releaseFingerprintAtCommit,
+} from "../../scripts/release-fingerprint.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const manifestPath = resolve(
@@ -99,9 +103,14 @@ assert.equal(
   "deployment source commit is not an ancestor of HEAD",
 );
 assert.equal(
-  releaseFingerprint(root),
+  releaseFingerprintAtCommit(root, manifest.source.commit),
   manifest.source.releaseFingerprintSha256,
-  "release-sensitive files differ from the deployed source",
+  "deployment source fingerprint does not match the manifest",
+);
+assert.equal(
+  protocolFingerprint(root),
+  protocolFingerprintAtCommit(root, manifest.source.commit),
+  "protocol-sensitive source differs from the deployed release",
 );
 
 assert.equal(manifest.build.profile, "production");

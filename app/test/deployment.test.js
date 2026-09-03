@@ -1,11 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { getAddress, keccak256 } from 'viem';
 import { verifyManifestDeployment } from '../src/lib/deployment.js';
 import {
   assertRuntimeMatchesArtifact,
   normalizeRuntimeBytecode
 } from '../../scripts/production-artifacts.mjs';
+import {
+  protocolFiles,
+  protocolFingerprint,
+  protocolFingerprintAtCommit,
+  releaseFingerprintAtCommit
+} from '../../scripts/release-fingerprint.mjs';
+import baseSepoliaDeployment from '../src/lib/deployments/base-sepolia.json' with { type: 'json' };
 
 const addresses = {
   factory: '0x1000000000000000000000000000000000000001',
@@ -86,4 +94,15 @@ test('release attestation rejects bytecode from a different source build', () =>
     () => assertRuntimeMatchesArtifact('0x6101ff026003', artifact, 'fixture'),
     /was not produced by the current production build/
   );
+});
+
+test('deployment fingerprint remains bound to its exact historical source commit', () => {
+  const root = fileURLToPath(new URL('../..', import.meta.url));
+  assert.equal(
+    releaseFingerprintAtCommit(root, baseSepoliaDeployment.source.commit),
+    baseSepoliaDeployment.source.releaseFingerprintSha256
+  );
+  assert.equal(protocolFingerprint(root), protocolFingerprintAtCommit(root, baseSepoliaDeployment.source.commit));
+  assert.ok(protocolFiles(root).includes('contracts/QueenCheckGame.sol'));
+  assert.ok(!protocolFiles(root).includes('app/src/routes/+page.svelte'));
 });
