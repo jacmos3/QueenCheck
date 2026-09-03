@@ -1,10 +1,10 @@
 # QueenCheck web client
 
-Static SvelteKit client for `queencheck.com`. It has no application backend: reads, writes and EIP-712 signatures go through the user's injected EIP-1193 wallet. Only Base Sepolia (`84532`) and a local development chain (`31337`) are accepted; mainnet is intentionally unavailable.
+Static SvelteKit client for `queencheck.com`. It has no application backend. Public discovery and spectator views use the fixed, unauthenticated Base Sepolia endpoint `https://sepolia.base.org`; wallet access is requested only for writes and EIP-712 signatures. Connected local development can also use chain `31337`; mainnet is intentionally unavailable.
 
 ## Configuration
 
-Base Sepolia's factory address comes only from the versioned, exact-source-verified manifest at `src/lib/deployments/base-sepolia.json`; an environment variable cannot silently replace it. Before enabling reads or writes, the client hashes the live bytecode of the factory, implementation, rules engine, renderer, and record, and verifies every immutable relationship against that manifest. `.env.example` contains only the optional local-chain override. Never add a private key, mnemonic, RPC credential or other secret. The client stores only versioned public move authorizations and signatures in browser local storage, scoped by chain, game and account.
+Base Sepolia's factory address and discovery start block come only from the versioned, exact-source-verified manifest at `src/lib/deployments/base-sepolia.json`; an environment variable or URL parameter cannot silently replace either value. Before showing a public match or enabling a write, the client checks the RPC chain, hashes the live bytecode of the factory, implementation, rules engine, renderer, and record, and verifies every immutable relationship against that manifest. Public discovery reads only confirmed `GameCreated` logs from that factory, then rechecks registration, bytecode and immutable game identity before rendering a card. `.env.example` contains only the optional local-chain factory override. Never add a private key, mnemonic, RPC credential or other secret. The client stores only versioned public move authorizations and signatures in browser local storage, scoped by chain, game and account.
 
 ## Contract synchronization boundary
 
@@ -22,4 +22,6 @@ The signed-draw flow uses a separate strict JSON schema bound to the exact curre
 
 ## Local commands
 
-With Node.js 22.13 or later: `npm install`, `npm test`, `npm run check`, then `npm run build`. Dependencies are exactly pinned in `package.json`; commit the generated lockfile after the integration install.
+With Node.js 22.13 or later, first run `npm ci` and `npm run compile` from the repository root so the deployment checker can compare fresh production artifacts with the live contracts. Then run `npm ci`, `npm test`, `npm run check`, and `npm run build` from `app/`. Dependencies are exactly pinned in both lockfiles.
+
+For the `queencheck.semproxlab.it` Apache document root, run `npm run package:apache -- /absolute/output/path.zip` after a successful build. The command refuses to overwrite an existing archive, converts the static fallback into `index.html`, removes the provider-specific `_headers` file, and includes the reviewed `.htaccess` for HTTPS, SPA routing, caching, and response security headers. Its HTTPS redirect is deliberately pinned to `queencheck.semproxlab.it`; change and review that host before reusing the package for another domain.

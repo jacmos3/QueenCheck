@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
     "check:deployment": "node scripts/check-deployment-manifest.mjs",
+    "package:apache": "node scripts/package-apache.mjs",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
