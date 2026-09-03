@@ -3,6 +3,121 @@
   "project": "QueenCheck",
   "network": "base-sepolia",
   "chainId": 84532,
-  "status": "not-deployed",
-  "contracts": {}
+  "status": "deployed",
+  "source": {
+    "repository": "https://github.com/jacmos3/QueenCheck",
+    "commit": "2a6c247d8eb9321fb8ffeebce143007219b49af1",
+    "tree": "be058b946aa3bc9306d66a3b2b23fcd8e38334b2",
+    "releaseFingerprintSha256": "6978e1d4cb37e648143a8744931d37c3be2178f518a81edc7acbd00bb47ebdff",
+    "url": "https://github.com/jacmos3/QueenCheck/tree/2a6c247d8eb9321fb8ffeebce143007219b49af1"
+  },
+  "build": {
+    "profile": "production",
+    "solidity": "0.8.28",
+    "evmVersion": "cancun",
+    "optimizerRuns": 500,
+    "viaIR": true,
+    "lockfiles": {
+      "rootSha256": "c53f39ac678bbcc92b097d036c35c307ed527a224d9b7a479842773e0facb630",
+      "appSha256": "d37b958e3a7943f52ddfd2e9ade13d1f9e4bcbb37fc1574548bc0590e8eb72da"
+    },
+    "abiSha256": "f4742e050dcb08650e3114cc1ea2f8a2dbf07603af4be531d6d8640b174a496d",
+    "artifactSetSha256": "8dc3e02021c897a01ae9f8bf86eb0458b318d63da2948748597e44a4117ebce3"
+  },
+  "deployment": {
+    "id": "queencheck-2a6c247d8eb9321fb8ffeebce143007219b49af1",
+    "deployer": "0x5ceDe166bf5689e14bB82dD4d61e4237461b0907",
+    "blockNumber": 46316945,
+    "timestamp": "2026-09-03T02:22:58.000Z"
+  },
+  "rulesetId": "0x2952c211fea32cbfec3555f0c4b2abe175950d5b268d05044b013cca59c2ad8b",
+  "contracts": {
+    "rulesEngine": {
+      "address": "0xAff14b516A058205862ECF6b2E2e5D76e727af18",
+      "creationTransactionHash": "0x1ea757a12fff88eb236bca8d8530b7721f52e73a03fe55b0a36dc88a1ff09eea",
+      "blockNumber": 46316937,
+      "runtimeCodeHash": "0x03014c4940c7a4fa42c573ad33a339d20c594da76bed37e1303acec0f53246e3",
+      "artifactSha256": "b951b7a77e64a4e82eb3267b56c6fb1368730f1a084ee01ca8585bc0b34eb0f0",
+      "compilerInputSha256": "e52f4d1d51aef1ae98188d914101a081d7147f9c865da1a71228638484b4023a",
+      "buildInfoId": "solc-0_8_28-85c0cca65426df8fd7474faa584e3c55f68d0906",
+      "normalizedRuntimeCodeSha256": "6d4a027500efeeacc7ca82f4c4a4fca7672aa097d5668a0a2523c5fbceae5b5f",
+      "sourceVerification": "exact_match",
+      "verifiedAt": "2026-09-03T02:23:11Z",
+      "sourcifyUrl": "https://repo.sourcify.dev/84532/0xAff14b516A058205862ECF6b2E2e5D76e727af18",
+      "explorerUrl": "https://sepolia.basescan.org/address/0xAff14b516A058205862ECF6b2E2e5D76e727af18"
+    },
+    "gameImplementation": {
+      "address": "0x6691C03D4B05Af1714f202cdfb0B84933BFd293D",
+      "creationTransactionHash": "0xaff4b7cc5e72b8cddd3ef4b03fe33aebff628aa46624f9e325bc5753f86b9d34",
+      "blockNumber": 46316938,
+      "runtimeCodeHash": "0x79e2d8f0430ac0695a646365b15a647b1c07253eb93d09b9b8fa235e85c1a7d3",
+      "artifactSha256": "fcd3da352a23ae0aaa613b8d5ad7f8f39d796e75a89f8b2e14fe74a13c50c12f",
+      "compilerInputSha256": "201867242e3f180c1a33af7920efa94c7977cdabb5c2c1f3a5b3e0e15f868274",
+      "buildInfoId": "solc-0_8_28-ab91c98b797cf5c6d06ef69c3448e10f613a9cf2",
+      "normalizedRuntimeCodeSha256": "b86b0e7c780309e05ddbc9fd6b3a4fee3211224f55d8088231f2f932c2a36ae5",
+      "sourceVerification": "exact_match",
+      "verifiedAt": "2026-09-03T02:23:17Z",
+      "sourcifyUrl": "https://repo.sourcify.dev/84532/0x6691C03D4B05Af1714f202cdfb0B84933BFd293D",
+      "explorerUrl": "https://sepolia.basescan.org/address/0x6691C03D4B05Af1714f202cdfb0B84933BFd293D"
+    },
+    "renderer": {
+      "address": "0xE8B167D391E62a27ae2068EC6D7bEe1a61F0B924",
+      "creationTransactionHash": "0x159527d535104963a46d6276a96626b1b57c93aa1fdaa83bcdd4bc0f5efe7feb",
+      "blockNumber": 46316939,
+      "runtimeCodeHash": "0x5f58a520ccf54f9489f755164ef9726bf549de6584879541d5789acb42977b73",
+      "artifactSha256": "118f1384a70c990e4aaf1a2987c7b1b1f0a59d410defe7c83d82131a4e0f5363",
+      "compilerInputSha256": "c041ae13dace1373d30883a273f40820abf5e06f78bd5bc99c68007f11e1a1a1",
+      "buildInfoId": "solc-0_8_28-71aa00492aac3d0e286217374ee410af7faeee89",
+      "normalizedRuntimeCodeSha256": "f39a80a32d4c7482ea6a0e8737cdc7a7a574eb5b4c6e93db7d40f92a80cd883f",
+      "sourceVerification": "exact_match",
+      "verifiedAt": "2026-09-03T02:23:21Z",
+      "sourcifyUrl": "https://repo.sourcify.dev/84532/0xE8B167D391E62a27ae2068EC6D7bEe1a61F0B924",
+      "explorerUrl": "https://sepolia.basescan.org/address/0xE8B167D391E62a27ae2068EC6D7bEe1a61F0B924"
+    },
+    "factory": {
+      "address": "0xF8507db5B615B47f821204e07346Df3C42B6B15E",
+      "creationTransactionHash": "0x295e6872e095bb4d58e0aea4ff5a20641a6c257237678a1d45f054069cded12f",
+      "blockNumber": 46316945,
+      "runtimeCodeHash": "0xd6c3be90d94dfa3831d86d916e5746b92ced9f4b4f4053bd7b05eedf1d9a88d3",
+      "artifactSha256": "88aa4819742b794735e001e734f96a8fe407df34cec1ae64e9d25f02dae1598c",
+      "compilerInputSha256": "5d442d70414c595537515f1ebd96ffcda4ea884ada9a23caec1b64eef93068f8",
+      "buildInfoId": "solc-0_8_28-7bd7fd695d2115ac75cd9503e7cd64092a3928cb",
+      "normalizedRuntimeCodeSha256": "065568f6ea3acd4989d89e342d9a8f195244cff7670bda1fa3926a98862e566a",
+      "sourceVerification": "exact_match",
+      "verifiedAt": "2026-09-03T02:23:31Z",
+      "sourcifyUrl": "https://repo.sourcify.dev/84532/0xF8507db5B615B47f821204e07346Df3C42B6B15E",
+      "explorerUrl": "https://sepolia.basescan.org/address/0xF8507db5B615B47f821204e07346Df3C42B6B15E"
+    },
+    "record": {
+      "address": "0xBB4DEC4Be545AfEffDfA7696df41F16b38c379fA",
+      "creationTransactionHash": "0x295e6872e095bb4d58e0aea4ff5a20641a6c257237678a1d45f054069cded12f",
+      "blockNumber": 46316945,
+      "runtimeCodeHash": "0xa750e1bf605b9de51746c3163777e2a509fb745cfd9c7916125d32291367895a",
+      "artifactSha256": "5184085c8c7fb4c51cd6ae7026d9d772bab1f3590ef26102fc7e921fe508f3f7",
+      "compilerInputSha256": "10b95d847cc45d9ef58a4a99ea9288afc76bbcabc4bdc6094cda4c92807f2316",
+      "buildInfoId": "solc-0_8_28-8369ba439bd291ca2068b49fe82af18d43460675",
+      "normalizedRuntimeCodeSha256": "be77b22be7d58c4e9f141111f21b4a2afee539e7e6bf43b4f6d4ee293fb336bb",
+      "sourceVerification": "exact_match",
+      "verifiedAt": "2026-09-03T02:23:40Z",
+      "sourcifyUrl": "https://repo.sourcify.dev/84532/0xBB4DEC4Be545AfEffDfA7696df41F16b38c379fA",
+      "explorerUrl": "https://sepolia.basescan.org/address/0xBB4DEC4Be545AfEffDfA7696df41F16b38c379fA"
+    }
+  },
+  "relationships": {
+    "factory": {
+      "implementation": "0x6691C03D4B05Af1714f202cdfb0B84933BFd293D",
+      "rules": "0xAff14b516A058205862ECF6b2E2e5D76e727af18",
+      "renderer": "0xE8B167D391E62a27ae2068EC6D7bEe1a61F0B924",
+      "record": "0xBB4DEC4Be545AfEffDfA7696df41F16b38c379fA"
+    },
+    "record": {
+      "factory": "0xF8507db5B615B47f821204e07346Df3C42B6B15E",
+      "renderer": "0xE8B167D391E62a27ae2068EC6D7bEe1a61F0B924"
+    }
+  },
+  "verification": {
+    "provider": "sourcify",
+    "api": "https://sourcify.dev/server/v2",
+    "checkedAt": "2026-09-03T02:23:45.819Z"
+  }
 }
