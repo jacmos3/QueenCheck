@@ -1,134 +1,63 @@
 name: CI
 
 on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "test/**"
+      - "ignition/**"
+      - "scripts/**"
+      - "app/**"
+      - "hardhat.config.ts"
+      - "tsconfig.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".nvmrc"
+      - ".github/workflows/ci.yml"
   push:
     branches: [main]
-    # Do not allocate even the lightweight change-detector runner for files
-    # that are already classified as documentation or Codex-only metadata.
-    paths-ignore:
-      - AGENTS.md
-      - "**/AGENTS.md"
-      - ".codex/**"
-      - README.md
-      - LICENSE.md
-      - "docs/**"
-  pull_request:
+    paths:
+      - "contracts/**"
+      - "test/**"
+      - "ignition/**"
+      - "scripts/**"
+      - "app/**"
+      - "hardhat.config.ts"
+      - "tsconfig.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".nvmrc"
+      - ".github/workflows/ci.yml"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
-concurrency:
-  # PR diffs are cumulative, so obsolete PR runs may be canceled. Push diffs
-  # are per-event, so distinct push revisions must never share a group.
-  group: chess-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'latest' || github.sha }}
-  cancel-in-progress: true
-
 jobs:
-  changes:
-    name: Detect relevant changes
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      contracts: ${{ steps.filter.outputs.contracts }}
-      frontend: ${{ steps.filter.outputs.frontend }}
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          fetch-depth: 0
-          filter: blob:none
-          persist-credentials: false
-      - name: Select required jobs
-        id: filter
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          contracts=true
-          frontend=true
-
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
-            if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]] &&
-              git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-              contracts=false
-              frontend=false
-              changed_file_found=false
-              changed_files_path="$RUNNER_TEMP/chess-ci-changed-files"
-              git diff --name-only -z "$BASE_SHA" "$GITHUB_SHA" > "$changed_files_path"
-
-              while IFS= read -r -d '' changed_path; do
-                changed_file_found=true
-                case "$changed_path" in
-                  AGENTS.md|*/AGENTS.md|.codex/*|README.md|LICENSE.md|docs/*)
-                    ;;
-                  frontend/*)
-                    frontend=true
-                    ;;
-                  ethereum/*)
-                    contracts=true
-                    frontend=true
-                    ;;
-                  *)
-                    contracts=true
-                    frontend=true
-                    ;;
-                esac
-              done < "$changed_files_path"
-
-              if [[ "$changed_file_found" != true ]]; then
-                contracts=true
-                frontend=true
-              fi
-            fi
-          fi
-
-          echo "contracts=$contracts" >> "$GITHUB_OUTPUT"
-          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
-
-  contracts:
-    needs: changes
-    if: needs.changes.outputs.contracts == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ethereum/package-lock.json
-      - run: npm ci --ignore-scripts
-        working-directory: ethereum
-      - run: npm run test:ci
-        working-directory: ethereum
-
-  frontend:
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
-        with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: |
-            ethereum/package-lock.json
-            frontend/package-lock.json
-      - run: npm ci --ignore-scripts
-        working-directory: ethereum
+            package-lock.json
+            app/package-lock.json
+      - run: npm ci
       - run: npm run compile
-        working-directory: ethereum
-      - run: npm ci --ignore-scripts
-        working-directory: frontend
-      - run: npm audit --audit-level=high
-        working-directory: frontend
+      - run: npm run check:abi
       - run: npm test
-        working-directory: frontend
-      - run: npm run build
-        working-directory: frontend
-      - name: Verify generated ABIs are committed
-        run: git diff --exit-code -- frontend/src/lib/contracts/abi
+      - run: npm run check:size
+      - run: npm --prefix app ci
+      - run: npm --prefix app test
+      - run: npm --prefix app run check
+      - run: npm --prefix app run build
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm --prefix app audit --omit=dev --audit-level=high

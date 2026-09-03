@@ -1,4 +1,4 @@
-# LinkedChess Project Instructions
+# QueenCheck Project Instructions
 
 ## Existing work
 
@@ -30,16 +30,19 @@
 
 ## Protocol safeguards
 
-- Treat contract authorization, external calls, token and ETH accounting, state transitions, timeouts, dispute resolution, and upgrade or deployment configuration as high-risk boundaries.
+- QueenCheck's protocol core must not introduce fungible tokens, payments, prizes, wagering, escrow, transferable game records, governance tokens, protocol fees, or financial rights.
+- Treat contract authorization, signatures, replay protection, external calls, state transitions, timeouts, record minting, and deployment configuration as high-risk boundaries.
 - Distinguish frontend validation from enforceable onchain invariants. Never rely on the UI as the only protection for a protocol rule.
 - Do not use real private keys, production credentials, or funded mainnet accounts during development or verification.
 - Keep generated artifacts, deployed addresses, ABIs, frontend configuration, and contract source synchronized when a task legitimately changes their interface.
+- Base Sepolia is the only configured public network. Do not add or deploy to mainnet without a new independent contract audit, legal review, explicit deployment plan, and explicit user authorization.
+- The game record is opt-in and soulbound. Any change that makes it transferable or attaches economic benefits requires a fresh architecture and legal review.
 
 ## Verification
 
 - Prefer targeted contract or frontend tests before broader suites.
-- Serialize local chains, contract compilation, deployment simulations, frontend builds, and browser automation on this machine.
-- For protocol changes, verify both the expected path and concrete adversarial or liveness failure paths identified during review.
+- Serialize contract compilation/tests, deployment simulations, frontend builds, and browser automation on this machine.
+- For protocol changes, verify live moves, signed checkpoints, replay/domain separation, atomic batch failure, timeout grace, terminal chess states, and record non-transferability.
 
 ## Resource safety
 

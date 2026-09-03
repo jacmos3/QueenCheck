@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "project": "QueenCheck",
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "status": "not-deployed",
+  "contracts": {}
+}

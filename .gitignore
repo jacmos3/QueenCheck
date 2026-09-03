@@ -1,25 +1,31 @@
-# macOS
+# Operating systems and editors
 .DS_Store
-
-#node
-node_modules/
-frontend/.svelte-kit/
-
-#solidity
-artifacts/
-
-#truffle
-build/
-
-#remix
-.deps/
-
-#node
-.env
-.env.local
-
-#misc
-
 .idea/
-.next/
 .vscode/
+
+# Dependencies and local package state
+node_modules/
+app/node_modules/
+
+# Hardhat
+artifacts/
+cache/
+coverage/
+ignition/deployments/
+
+# SvelteKit
+app/.svelte-kit/
+app/build/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+!app/.env.example
+.hardhat-keystore.json
+
+# Logs and temporary files
+*.log
+tmp/

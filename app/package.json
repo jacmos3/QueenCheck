@@ -1,0 +1,28 @@
+{
+  "name": "queencheck-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "npm run check:deployment && vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
+    "check:deployment": "node scripts/check-deployment-manifest.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "chess.js": "1.4.0",
+    "viem": "2.56.3"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "svelte": "5.57.0",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "8.2.2"
+  }
+}
