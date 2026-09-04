@@ -9,7 +9,7 @@
   import { assertTrustedDeployment } from '$lib/deployment.js';
   import { factoryAbi, gameAbi, recordAbi } from '$lib/contracts/abi.js';
   import { moveTypedData, nextTranscriptRoot } from '$lib/eip712.js';
-  import { loadTranscript, mergeTranscripts, parseTranscriptJson, saveTranscript, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '$lib/transcript.js';
+  import { loadTranscript, mergeTranscripts, parseTranscriptJson, pruneTranscriptBeforePly, saveQueuedTranscriptMove, saveTranscript, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '$lib/transcript.js';
   import { createDrawAgreement, drawAgreementTypedData, parseDrawAgreementJson, validateDrawAgreement, withDrawSignature } from '$lib/draw-agreement.js';
   import { getPublicReadSession } from '$lib/public-client.js';
   import { assertSessionCurrent, waitForSuccessfulReceipt } from '$lib/wallet.js';
@@ -230,17 +230,14 @@
       const computedNextRoot = nextTranscriptRoot(message);
       const signature = await snapshot.walletClient.signTypedData({ account: snapshot.account, ...moveTypedData(snapshot.chainId, address, message) });
       assertSessionCurrent(session, snapshot, sessionGeneration, generation);
-      transcript = {
-        ...transcript,
-        moves: [...transcript.moves, {
-          ...message,
-          gameId: String(message.gameId),
-          nextTranscriptRoot: computedNextRoot,
-          signer: snapshot.account,
-          signature
-        }]
-      };
-      saveTranscript(localStorage, transcript, snapshot.account); rebuildDisplayBoard();
+      transcript = saveQueuedTranscriptMove(localStorage, transcript, game.ply, {
+        ...message,
+        gameId: String(message.gameId),
+        nextTranscriptRoot: computedNextRoot,
+        signer: snapshot.account,
+        signature
+      }, snapshot.account);
+      rebuildDisplayBoard();
       notice = 'Move signed locally. Export it for the other player, or archive when the batch has every required signature.';
     } finally {
       if (session === snapshot && sessionGeneration === generation) busy = false;
@@ -318,8 +315,13 @@
       `${batch.length} signed move(s) archived. The onchain SVG has been updated.`
     );
     if (succeeded && session && checkpointAccount && session.account === checkpointAccount) {
-      transcript = { ...transcript, moves: transcript.moves.filter((move) => Number(move.ply) >= Number(game.ply)) };
-      saveTranscript(localStorage, transcript, session.account); rebuildDisplayBoard();
+      try {
+        const nextTranscript = pruneTranscriptBeforePly(transcript, game.ply);
+        transcript = saveTranscript(localStorage, nextTranscript, session.account);
+        rebuildDisplayBoard();
+      } catch (cause) {
+        error = `The checkpoint succeeded, but the local transcript could not be updated: ${friendly(cause)}`;
+      }
     }
   }
 
@@ -360,12 +362,14 @@
     busy = true;
     try {
       const incoming = parseTranscriptJson(importText, { chainId: snapshot.chainId, game: address });
-      const merged = mergeTranscripts(transcript, incoming);
-      const moves = merged.moves.filter((move) => Number(move.ply) >= Number(game.ply));
-      validateTranscriptContinuation(moves, game);
-      await verifyQueuedSignatures(moves, snapshot, generation);
+      const currentTranscript = pruneTranscriptBeforePly(transcript, game.ply);
+      const incomingTranscript = pruneTranscriptBeforePly(incoming, game.ply);
+      const merged = mergeTranscripts(currentTranscript, incomingTranscript);
+      validateTranscriptContinuation(merged.moves, game);
+      await verifyQueuedSignatures(merged.moves, snapshot, generation);
       assertSessionCurrent(session, snapshot, sessionGeneration, generation);
-      transcript = merged; saveTranscript(localStorage, transcript, snapshot.account); rebuildDisplayBoard(); importText = '';
+      transcript = saveTranscript(localStorage, merged, snapshot.account);
+      rebuildDisplayBoard(); importText = '';
       notice = 'Transcript validated and merged. Sign only when this wallet controls the expected player.';
     } catch (cause) {
       if (session === snapshot && sessionGeneration === generation) error = friendly(cause);

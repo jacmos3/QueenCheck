@@ -4,7 +4,6 @@ DirectoryIndex index.html
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteCond %{HTTPS} !=on
-  RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
   RewriteRule ^ https://queencheck.semproxlab.it%{REQUEST_URI} [R=301,L,NE]
 
   RewriteCond %{REQUEST_FILENAME} -f [OR]

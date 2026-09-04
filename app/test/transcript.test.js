@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TRANSCRIPT_BYTES, mergeTranscripts, parseTranscriptJson, saveTranscript, storageKey, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '../src/lib/transcript.js';
+import { MAX_TRANSCRIPT_BYTES, mergeTranscripts, parseTranscriptJson, pruneTranscriptBeforePly, saveQueuedTranscriptMove, saveTranscript, storageKey, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '../src/lib/transcript.js';
 import { nextTranscriptRoot } from '../src/lib/eip712.js';
 
 const game = '0x1111111111111111111111111111111111111111';
@@ -34,8 +34,44 @@ test('discontinuous and conflicting histories are rejected', () => {
 
 test('storage contains only validated public transcript material', () => {
   const memory = new Map(); const storage = { setItem: (key, value) => memory.set(key, value) };
-  saveTranscript(storage, transcript([move(0, h0, h1)]), player);
+  const saved = saveTranscript(storage, transcript([move(0, h0, h1)]), player);
+  assert.equal(saved.moves.length, 1);
   assert.equal(memory.size, 1); assert.equal([...memory.values()][0].includes('privateKey'), false);
+});
+
+test('a current queued move replaces stale archived history before persistence', () => {
+  const stale = transcript([move(0, h0, h1), move(1, h1, h2)]);
+  const currentRoot = `0x${'33'.repeat(32)}`;
+  const currentNextRoot = `0x${'44'.repeat(32)}`;
+  const currentMove = move(4, currentRoot, currentNextRoot);
+  const memory = new Map();
+  const storage = { setItem: (key, value) => memory.set(key, value) };
+  const saved = saveQueuedTranscriptMove(storage, stale, 4, currentMove, player);
+  assert.deepEqual(saved.moves.map(({ ply }) => ply), [4]);
+  assert.deepEqual(JSON.parse([...memory.values()][0]).moves.map(({ ply }) => ply), [4]);
+});
+
+test('failed current-move persistence leaves stale caller state unchanged', () => {
+  const original = transcript([move(0, h0, h1), move(1, h1, h2)]);
+  const currentMove = move(4, `0x${'33'.repeat(32)}`, `0x${'44'.repeat(32)}`);
+  const storage = { setItem: () => { throw new Error('quota exceeded'); } };
+  let current = original;
+  assert.throws(() => {
+    current = saveQueuedTranscriptMove(storage, current, 4, currentMove, player);
+  }, /quota exceeded/);
+  assert.strictEqual(current, original);
+});
+
+test('stale histories are pruned before merging current imported moves', () => {
+  const stale = transcript([move(0, h0, h1), move(1, h1, h2)]);
+  const currentRoot = `0x${'33'.repeat(32)}`;
+  const currentNextRoot = `0x${'44'.repeat(32)}`;
+  const incoming = transcript([move(4, currentRoot, currentNextRoot)]);
+  const merged = mergeTranscripts(
+    pruneTranscriptBeforePly(stale, 4),
+    pruneTranscriptBeforePly(incoming, 4)
+  );
+  assert.deepEqual(merged.moves.map(({ ply }) => ply), [4]);
 });
 
 test('continuation is bound to exact onchain domain, ply and recalculated roots', () => {

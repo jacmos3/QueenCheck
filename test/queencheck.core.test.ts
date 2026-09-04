@@ -44,6 +44,7 @@ describe("QueenCheck protocol", { concurrency: false }, async () => {
   let saltCounter = 0n;
   const zero = "0x0000000000000000000000000000000000000000" as Address;
   const salt = () => `0x${(++saltCounter).toString(16).padStart(64, "0")}` as Hex;
+  const emptyBoard = () => Array.from({ length: 8 }, () => Array<number>(8).fill(0));
 
   async function deploySystem() {
     const rules = await viem.deployContract("ChessRulesEngine");
@@ -436,6 +437,178 @@ describe("QueenCheck protocol", { concurrency: false }, async () => {
     assert.equal(await timed.read.status(), 4);
   });
 
+  it("detects stalemate and preserves an en-passant-only escape", async () => {
+    const rules = await viem.deployContract("ChessRulesEngine");
+    const stalemate = emptyBoard();
+    stalemate[0][0] = -6; // black king a8
+    stalemate[2][1] = 5;  // white queen b6
+    stalemate[2][2] = 6;  // white king c6
+    const stalemateState = await rules.read.detectCheckState([
+      stalemate, true, false, false, 2, 2, 0, 0, -1, 0, 0, 0, 0,
+    ]);
+    assert.deepEqual(stalemateState, [false, false, 2]);
+
+    // k7/8/1QK5/8/3Pp3/4R3/8/8 b - d3 0 1:
+    // without the en-passant capture black has no legal move.
+    const enPassantEscape = emptyBoard();
+    enPassantEscape[0][0] = -6;
+    enPassantEscape[2][1] = 5;
+    enPassantEscape[2][2] = 6;
+    enPassantEscape[4][3] = 1;
+    enPassantEscape[4][4] = -1;
+    enPassantEscape[5][4] = 4;
+    const withEnPassant = await rules.read.detectCheckState([
+      enPassantEscape, true, false, false, 2, 2, 0, 0, 3, 4, 0, 0, 0,
+    ]);
+    const withoutEnPassant = await rules.read.detectCheckState([
+      enPassantEscape, true, false, false, 2, 2, 0, 0, -1, 0, 0, 0, 0,
+    ]);
+    assert.equal(Number(withEnPassant[2]), 1);
+    assert.equal(Number(withoutEnPassant[2]), 2);
+  });
+
+  it("enforces absolute pins and canonicalizes only legal en passant", async () => {
+    const rules = await viem.deployContract("ChessRulesEngine");
+    const pinnedRook = emptyBoard();
+    pinnedRook[0][0] = -6; // black king a8
+    pinnedRook[0][4] = -4; // black rook e8
+    pinnedRook[6][4] = 4;  // white rook e2
+    pinnedRook[7][4] = 6;  // white king e1
+    assert.equal(await rules.read.isValidMoveView([
+      pinnedRook, -1, 0, 0, 6, 4, 6, 5,
+    ]), true);
+    assert.equal(await rules.read.wouldMoveLeaveKingInCheck([
+      pinnedRook, 7, 4, 0, 0, 6, 4, 6, 5,
+    ]), true);
+    assert.equal(await rules.read.wouldMoveLeaveKingInCheck([
+      pinnedRook, 7, 4, 0, 0, 6, 4, 5, 4,
+    ]), false);
+    assert.equal(await rules.read.wouldMoveLeaveKingInCheck([
+      pinnedRook, 7, 4, 0, 0, 6, 4, 0, 4,
+    ]), false);
+
+    // k3r3/8/8/3pP3/8/8/8/4K3 w - d6 0 1: e5xd6 would expose the e-file.
+    const pinnedEnPassant = emptyBoard();
+    pinnedEnPassant[0][0] = -6;
+    pinnedEnPassant[0][4] = -4;
+    pinnedEnPassant[3][3] = -1;
+    pinnedEnPassant[3][4] = 1;
+    pinnedEnPassant[7][4] = 6;
+    assert.equal(await rules.read.isValidMoveView([
+      pinnedEnPassant, 3, 3, 0, 3, 4, 2, 3,
+    ]), true);
+    assert.equal(await rules.read.wouldMoveLeaveKingInCheck([
+      pinnedEnPassant, 7, 4, 0, 0, 3, 4, 2, 3,
+    ]), true);
+    const pinnedMarker = await rules.read.canonicalEnPassantForPosition([
+      pinnedEnPassant, true, 7, 4, 0, 0, 3, 3,
+    ]);
+    assert.deepEqual(pinnedMarker, [-1, 0]);
+
+    const legalEnPassant = pinnedEnPassant.map((row) => [...row]);
+    legalEnPassant[7][4] = 0;
+    legalEnPassant[7][7] = 6;
+    const legalMarker = await rules.read.canonicalEnPassantForPosition([
+      legalEnPassant, true, 7, 7, 0, 0, 3, 3,
+    ]);
+    assert.deepEqual(legalMarker, [3, 3]);
+  });
+
+  it("supports black castling and rejects attacked king paths", async () => {
+    const castling = await activeGame();
+    await playSequence(castling.game, [
+      [52, 36], [12, 28], [62, 45], [6, 21],
+      [61, 52], [5, 12], [48, 40], [4, 6],
+    ]);
+    const board = await castling.game.read.getBoard();
+    assert.equal(board[4], 0);
+    assert.equal(board[5], -4);
+    assert.equal(board[6], -6);
+    assert.equal(board[7], 0);
+    assert.notEqual(Number(await castling.game.read.castlingFlags()) & (1 << 3), 0);
+
+    const transitAttacked = emptyBoard();
+    transitAttacked[0][4] = -6;
+    transitAttacked[0][7] = -4;
+    transitAttacked[7][4] = 6;
+    transitAttacked[7][5] = 4;
+    assert.equal(await castling.rules.read.isValidMoveView([
+      transitAttacked, -1, 0, 0, 0, 4, 0, 6,
+    ]), false);
+
+    const originAttacked = emptyBoard();
+    originAttacked[0][4] = -6;
+    originAttacked[0][7] = -4;
+    originAttacked[7][0] = 6;
+    originAttacked[7][4] = 4;
+    assert.equal(await castling.rules.read.isValidMoveView([
+      originAttacked, -1, 0, 0, 0, 4, 0, 6,
+    ]), false);
+
+    const destinationAttacked = emptyBoard();
+    destinationAttacked[0][4] = -6;
+    destinationAttacked[0][7] = -4;
+    destinationAttacked[7][0] = 6;
+    destinationAttacked[7][6] = 4;
+    assert.equal(await castling.rules.read.isValidMoveView([
+      destinationAttacked, -1, 0, 0, 0, 4, 0, 6,
+    ]), false);
+
+    // An attack on b8 does not invalidate black's e8-c8 castle path.
+    const irrelevantAttack = emptyBoard();
+    irrelevantAttack[0][0] = -4;
+    irrelevantAttack[0][4] = -6;
+    irrelevantAttack[7][1] = 4;
+    irrelevantAttack[7][7] = 6;
+    assert.equal(await castling.rules.read.isValidMoveView([
+      irrelevantAttack, -1, 0, 0, 0, 4, 0, 2,
+    ]), true);
+  });
+
+  it("classifies insufficient material and applies the automatic 75-move draw", async () => {
+    const system = await deployHarnessSystem();
+    const kings = emptyBoard();
+    kings[0][4] = -6;
+    kings[7][4] = 6;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([kings]), true);
+
+    const bishop = kings.map((row) => [...row]);
+    bishop[7][2] = 3;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([bishop]), true);
+    const knight = kings.map((row) => [...row]);
+    knight[7][1] = 2;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([knight]), true);
+
+    const sameColorBishops = bishop.map((row) => [...row]);
+    sameColorBishops[0][5] = -3;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([sameColorBishops]), true);
+    const oppositeColorBishops = bishop.map((row) => [...row]);
+    oppositeColorBishops[0][2] = -3;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([oppositeColorBishops]), false);
+    const twoKnights = knight.map((row) => [...row]);
+    twoKnights[7][6] = 2;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([twoKnights]), false);
+    const pawn = kings.map((row) => [...row]);
+    pawn[6][0] = 1;
+    assert.equal(await system.implementation.read.hasInsufficientMaterial([pawn]), false);
+
+    const created = await createGame(system);
+    await created.game.write.join({ account: black.account });
+    const game = await viem.getContractAt("QueenCheckGameHarness", created.game.address);
+    await game.write.setHalfmoveClock([149]);
+    await game.write.play([62, 45, 0], { account: white.account });
+    assert.equal(await game.read.halfmoveClock(), 150);
+    assert.equal(await game.read.status(), 2);
+
+    const resetCreated = await createGame(system);
+    await resetCreated.game.write.join({ account: black.account });
+    const reset = await viem.getContractAt("QueenCheckGameHarness", resetCreated.game.address);
+    await reset.write.setHalfmoveClock([149]);
+    await reset.write.play([52, 36, 0], { account: white.account });
+    assert.equal(await reset.read.halfmoveClock(), 0);
+    assert.equal(await reset.read.status(), 1);
+  });
+
   it("detects Fool's mate and refuses post-terminal moves", async () => {
     const { game } = await activeGame();
     await playSequence(game, [[53, 45], [12, 28], [54, 38], [3, 39]]);
@@ -477,8 +650,10 @@ describe("QueenCheck protocol", { concurrency: false }, async () => {
       [25, 17], [23, 31], [17, 9], [31, 39]]);
     await assert.rejects(promotion.game.write.play([9, 0, 0], { account: white.account }));
     assert.equal(await promotion.game.read.ply(), 8);
-    await promotion.game.write.play([9, 0, 5], { account: white.account });
-    assert.equal((await promotion.game.read.getBoard())[0], 5);
+    await assert.rejects(promotion.game.write.play([9, 0, 1], { account: white.account }));
+    await assert.rejects(promotion.game.write.play([9, 0, 6], { account: white.account }));
+    await promotion.game.write.play([9, 0, 2], { account: white.account });
+    assert.equal((await promotion.game.read.getBoard())[0], 2);
   });
 
   it("invalidates only the white castling side whose rook moved and returned", async () => {

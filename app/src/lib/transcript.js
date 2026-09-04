@@ -70,6 +70,24 @@ export function saveTranscript(storage, transcript, account) {
   const json = JSON.stringify(valid);
   if (new TextEncoder().encode(json).length > MAX_TRANSCRIPT_BYTES) throw new Error('Transcript exceeds size limit');
   storage.setItem(storageKey(valid.chainId, valid.game, account), json);
+  return valid;
+}
+
+export function pruneTranscriptBeforePly(transcript, ply) {
+  if (!uint(ply, 0xffffffff)) throw new Error('Invalid transcript ply');
+  const valid = validateTranscript(transcript);
+  return validateTranscript({
+    ...valid,
+    moves: valid.moves.filter((move) => Number(move.ply) >= Number(ply))
+  });
+}
+
+export function saveQueuedTranscriptMove(storage, transcript, onchainPly, move, account) {
+  const current = pruneTranscriptBeforePly(transcript, onchainPly);
+  if (Number(move?.ply) !== Number(onchainPly) + current.moves.length) {
+    throw new Error('Queued move ply does not continue from the onchain state');
+  }
+  return saveTranscript(storage, { ...current, moves: [...current.moves, move] }, account);
 }
 
 export function mergeTranscripts(current, incoming) {
