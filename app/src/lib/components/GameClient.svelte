@@ -1,7 +1,7 @@
 <script>
   import { env } from '$env/dynamic/public';
   import { Chess } from 'chess.js';
-  import { getAddress } from 'viem';
+  import { ContractFunctionRevertedError, getAddress } from 'viem';
   import { onMount } from 'svelte';
   import ChessBoard from './ChessBoard.svelte';
   import WalletButton from './WalletButton.svelte';
@@ -9,7 +9,8 @@
   import { assertTrustedDeployment } from '$lib/deployment.js';
   import { factoryAbi, gameAbi, recordAbi } from '$lib/contracts/abi.js';
   import { moveTypedData, nextTranscriptRoot } from '$lib/eip712.js';
-  import { loadTranscript, mergeTranscripts, parseTranscriptJson, pruneTranscriptBeforePly, saveQueuedTranscriptMove, saveTranscript, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '$lib/transcript.js';
+  import { discardQueuedTranscript, loadTranscript, mergeTranscripts, parseTranscriptJson, pruneTranscriptBeforePly, saveQueuedTranscriptMove, saveTranscript, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '$lib/transcript.js';
+  import { matchRecordAvailability, matchRecordTokenId } from '$lib/game-actions.js';
   import { createDrawAgreement, drawAgreementTypedData, parseDrawAgreementJson, validateDrawAgreement, withDrawSignature } from '$lib/draw-agreement.js';
   import { getPublicReadSession } from '$lib/public-client.js';
   import { assertSessionCurrent, waitForSuccessfulReceipt } from '$lib/wallet.js';
@@ -29,6 +30,9 @@
   let drawImportText = '';
   let drawAgreement = null;
   let recordAddress = '';
+  let recordClaimed = false;
+  let recordOwner = '';
+  let recordTokenId = null;
   let canClaimThreefold = false;
   let sessionGeneration = 0;
   let refreshGeneration = 0;
@@ -52,6 +56,7 @@
   $: isPlayer = session && [game.white, game.black].some((player) => player && player.toLowerCase() === session.account.toLowerCase());
   $: canCancelDraw = isPlayer && game.status === 1 && game.drawOfferer && game.drawOfferer.toLowerCase() === session.account.toLowerCase();
   $: canClaimFifty = isPlayer && game.status === 1 && game.halfmoveClock >= 100 && onchainPlayer && session.account.toLowerCase() === onchainPlayer.toLowerCase();
+  $: recordActions = matchRecordAvailability(game, session?.account, recordClaimed, recordOwner);
 
   onMount(() => {
     void refresh(null, sessionGeneration);
@@ -87,10 +92,42 @@
     busy = false;
     canClaimThreefold = false;
     drawAgreement = null;
+    recordClaimed = false;
+    recordOwner = '';
+    recordTokenId = null;
     transcript = { schema: TRANSCRIPT_SCHEMA, chainId: publicReadSession.chainId, game: address, moves: [] };
     displayChess = null;
     selected = null;
     void refresh(null, sessionGeneration);
+  }
+
+  async function readMatchRecordState(publicClient, chainId, record, account) {
+    const tokenId = matchRecordTokenId(chainId, address, account);
+    const claimed = await publicClient.readContract({
+      address: record, abi: recordAbi, functionName: 'claimed', args: [address, account]
+    });
+    let owner = '';
+    if (claimed) {
+      try {
+        owner = await publicClient.readContract({ address: record, abi: recordAbi, functionName: 'ownerOf', args: [tokenId] });
+      } catch (cause) {
+        const reverted = cause instanceof ContractFunctionRevertedError
+          ? cause
+          : typeof cause?.walk === 'function'
+            ? cause.walk((item) => item instanceof ContractFunctionRevertedError)
+            : null;
+        if (reverted?.data?.errorName !== 'ERC721NonexistentToken') throw cause;
+      }
+    }
+    return { claimed: Boolean(claimed), owner, tokenId };
+  }
+
+  async function refreshMatchRecordState(snapshot, generation) {
+    const next = await readMatchRecordState(snapshot.publicClient, snapshot.chainId, recordAddress, snapshot.account);
+    assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+    recordClaimed = next.claimed;
+    recordOwner = next.owner;
+    recordTokenId = next.tokenId;
   }
 
   async function refresh(snapshot = session, generation = sessionGeneration) {
@@ -126,6 +163,9 @@
         halfmoveClock: Number(halfmoveClock), moveTimeout: Number(moveTimeout),
         turnDeadline: Number(turnDeadline), timeoutFinalizeAfter: Number(timeoutFinalizeAfter), drawOfferer
       };
+      const nextRecordState = snapshot
+        ? await readMatchRecordState(reader.publicClient, reader.chainId, normalizedRecord, snapshot.account)
+        : { claimed: false, owner: '', tokenId: null };
       let threefold = false;
       const player = snapshot && [white, black].some((candidate) => candidate && candidate.toLowerCase() === snapshot.account.toLowerCase());
       if (Number(status) === 1 && player) {
@@ -139,6 +179,9 @@
       game = nextGame;
       board = [...rawBoard].map(Number);
       recordAddress = normalizedRecord;
+      recordClaimed = nextRecordState.claimed;
+      recordOwner = nextRecordState.owner;
+      recordTokenId = nextRecordState.tokenId;
       canClaimThreefold = threefold;
       if (snapshot && drawAgreement) {
         try { drawAgreement = validateDrawAgreement(drawAgreement, { chainId: snapshot.chainId, game: address, state: nextGame }); }
@@ -331,6 +374,19 @@
     link.href = url; link.download = `queencheck-${address}-${game.ply}.json`; link.click(); URL.revokeObjectURL(url);
   }
 
+  function discardTranscript() {
+    resetMessage();
+    if (!session) { error = 'Connect a wallet first.'; return; }
+    if (!window.confirm(`Discard ${queued.length} queued offline move(s) for this account? This cannot be undone.`)) return;
+    try {
+      transcript = saveTranscript(localStorage, discardQueuedTranscript(transcript, game.ply), session.account);
+      rebuildDisplayBoard();
+      notice = 'Queued offline transcript discarded for this account.';
+    } catch (cause) {
+      error = `The queued transcript could not be discarded: ${friendly(cause)}`;
+    }
+  }
+
   function authorizationMessage(move) {
     return {
       gameId: BigInt(move.gameId), rulesetId: move.rulesetId, ply: Number(move.ply),
@@ -382,18 +438,59 @@
   async function claimRecord() {
     if (!recordAddress) { error = 'The factory record contract has not been verified.'; return; }
     if (!session) { error = 'Connect a wallet first.'; return; }
+    if (!recordActions.canClaim) { error = 'This account cannot claim a record for this game.'; return; }
     const snapshot = session;
     const generation = sessionGeneration;
+    let confirmed = false;
     resetMessage(); busy = true;
     try {
       assertSessionCurrent(session, snapshot, sessionGeneration, generation);
       const hash = await snapshot.walletClient.writeContract({ address: recordAddress, abi: recordAbi, functionName: 'claim', args: [address] });
       assertSessionCurrent(session, snapshot, sessionGeneration, generation);
       await waitForSuccessfulReceipt(snapshot.publicClient, hash);
+      confirmed = true;
       assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      recordClaimed = true;
+      recordOwner = snapshot.account;
+      recordTokenId = matchRecordTokenId(snapshot.chainId, address, snapshot.account);
+      await refreshMatchRecordState(snapshot, generation);
       notice = 'Soulbound match record claimed.';
     } catch (cause) {
-      if (session === snapshot && sessionGeneration === generation) error = friendly(cause);
+      if (session === snapshot && sessionGeneration === generation) {
+        error = confirmed ? `The claim succeeded, but record state could not be refreshed: ${friendly(cause)}` : friendly(cause);
+      }
+    }
+    finally {
+      if (session === snapshot && sessionGeneration === generation) busy = false;
+    }
+  }
+
+  async function burnRecord() {
+    if (!recordAddress) { error = 'The factory record contract has not been verified.'; return; }
+    if (!session) { error = 'Connect a wallet first.'; return; }
+    if (!recordActions.canBurn || recordTokenId === null) { error = 'This account does not own an active record for this game.'; return; }
+    if (!window.confirm('Permanently burn this match record? It cannot be transferred or claimed again.')) return;
+    const snapshot = session;
+    const generation = sessionGeneration;
+    let confirmed = false;
+    resetMessage(); busy = true;
+    try {
+      assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      const hash = await snapshot.walletClient.writeContract({
+        address: recordAddress, abi: recordAbi, functionName: 'burn', args: [recordTokenId]
+      });
+      assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      await waitForSuccessfulReceipt(snapshot.publicClient, hash);
+      confirmed = true;
+      assertSessionCurrent(session, snapshot, sessionGeneration, generation);
+      recordClaimed = true;
+      recordOwner = '';
+      await refreshMatchRecordState(snapshot, generation);
+      notice = 'Match record burned permanently.';
+    } catch (cause) {
+      if (session === snapshot && sessionGeneration === generation) {
+        error = confirmed ? `The burn succeeded, but record state could not be refreshed: ${friendly(cause)}` : friendly(cause);
+      }
     }
     finally {
       if (session === snapshot && sessionGeneration === generation) busy = false;
@@ -531,9 +628,9 @@
             <label>Promotion<select bind:value={promotion}><option value={5}>Queen</option><option value={4}>Rook</option><option value={3}>Bishop</option><option value={2}>Knight</option></select></label>
           </div>
           <div class="panel compact"><h2>Game actions</h2><div class="button-grid"><button on:click={() => sendWrite('join')} disabled={busy || game.status !== 0}>Join / accept</button><button class="secondary" on:click={() => sendWrite('cancel')} disabled={busy || game.status !== 0 || game.white.toLowerCase() !== session.account.toLowerCase()}>Cancel</button><button class="secondary" on:click={() => sendWrite('resign')} disabled={busy || game.status !== 1 || !isPlayer}>Resign</button><button class="secondary" on:click={() => sendWrite('offerDraw')} disabled={busy || game.status !== 1 || !isPlayer}>Offer draw</button><button class="secondary" on:click={() => sendWrite('cancelDrawOffer')} disabled={busy || !canCancelDraw}>Cancel draw offer</button><button class="secondary" on:click={() => sendWrite('acceptDraw')} disabled={busy || game.status !== 1 || !isPlayer || !game.drawOfferer || game.drawOfferer.toLowerCase() === session.account.toLowerCase()}>Accept draw</button><button class="secondary" on:click={() => sendWrite('claimThreefold')} disabled={busy || !canClaimThreefold}>Claim threefold</button><button class="secondary" on:click={() => sendWrite('claimFiftyMove')} disabled={busy || !canClaimFifty}>Claim 50-move draw</button><button class="secondary" on:click={() => sendWrite('signalTimeout')} disabled={busy || game.status !== 1 || !isPlayer || !game.moveTimeout}>Signal timeout</button><button class="secondary" on:click={() => sendWrite('finalizeTimeout')} disabled={busy || !game.timeoutFinalizeAfter}>Finalize timeout</button></div>{#if game.moveTimeout}<p>Turn deadline: {new Date(game.turnDeadline * 1000).toLocaleString()}. {game.timeoutFinalizeAfter ? `Grace ends ${new Date(game.timeoutFinalizeAfter * 1000).toLocaleString()}.` : ''}</p>{/if}</div>
-          <div class="panel compact"><h2>Offline transcript <span class="count">{queued.length}</span></h2><p>Up to 16 signed moves per checkpoint. A different player/browser must import this file and add its own signature; QueenCheck does not claim automatic P2P sync.</p><div class="button-row"><button class="secondary" on:click={exportTranscript}>Export JSON</button><button on:click={checkpoint} disabled={!queued.length || busy}>Archive {Math.min(queued.length, 16)}</button></div><label>Import signed transcript<textarea bind:value={importText} maxlength="262144" rows="4" placeholder="Paste QueenCheck transcript JSON"></textarea></label><button class="secondary" on:click={importTranscript} disabled={!importText}>Validate & import</button></div>
+          <div class="panel compact"><h2>Offline transcript <span class="count">{queued.length}</span></h2><p>Up to 16 signed moves per checkpoint. A different player/browser must import this file and add its own signature; QueenCheck does not claim automatic P2P sync.</p><div class="button-row"><button class="secondary" on:click={exportTranscript}>Export JSON</button><button class="secondary" on:click={discardTranscript} disabled={!queued.length || busy}>Discard queued</button><button on:click={checkpoint} disabled={!queued.length || busy}>Archive {Math.min(queued.length, 16)}</button></div><label>Import signed transcript<textarea bind:value={importText} maxlength="262144" rows="4" placeholder="Paste QueenCheck transcript JSON"></textarea></label><button class="secondary" on:click={importTranscript} disabled={!importText}>Validate & import</button></div>
           <div class="panel compact"><h2>Signed draw agreement <span class="count">{drawAgreement?.signatures.length ?? 0}/2</span></h2><p>Both players sign the exact current onchain state. Any move makes an old agreement unusable.</p><div class="button-row"><button class="secondary" on:click={signDrawAgreement} disabled={busy || !isPlayer || game.status !== 1 || queued.length}>Sign current state</button><button class="secondary" on:click={exportDrawAgreement} disabled={game.status !== 1}>Export JSON</button><button on:click={submitDrawAgreement} disabled={busy || queued.length || (drawAgreement?.signatures.length ?? 0) !== 2}>Submit draw</button></div><label>Import signed draw agreement<textarea bind:value={drawImportText} maxlength="16384" rows="4" placeholder="Paste QueenCheck draw agreement JSON"></textarea></label><button class="secondary" on:click={importDrawAgreement} disabled={!drawImportText || busy}>Validate & import</button></div>
-          <div class="panel compact record"><h2>Optional match record</h2><p>The record NFT mirrors the latest archived SVG. It is opt-in, soulbound, burnable, and grants no token, prize, revenue, governance, or other economic right. Its address is read from and verified against the configured factory.</p><button on:click={claimRecord} disabled={busy || !recordAddress || !isPlayer || game.status === 0}>Claim record</button></div>
+          <div class="panel compact record"><h2>Optional match record</h2><p>The record NFT mirrors the latest archived SVG. It is opt-in, soulbound, burnable, and grants no token, prize, revenue, governance, or other economic right. Its address is read from and verified against the configured factory.</p>{#if recordActions.canClaim}<button on:click={claimRecord} disabled={busy || !recordAddress}>Claim record</button>{:else if recordActions.canBurn}<button class="secondary" on:click={burnRecord} disabled={busy || !recordAddress}>Burn record</button>{:else if recordClaimed}<p>This account's record was burned and cannot be claimed again.</p>{/if}</div>
         {:else}
           <div class="panel compact"><h2>Read-only view</h2><p>Connect only if you want to join this game or sign an action. Spectating never requests an account or signature.</p></div>
           <div class="panel compact record"><h2>Optional match record</h2><p>Players can claim a soulbound, burnable record whose SVG follows the latest archived onchain position. It carries no financial rights.</p></div>

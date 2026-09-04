@@ -8,6 +8,8 @@ on:
       - "test/**"
       - "ignition/**"
       - "scripts/**"
+      - "!scripts/audit-runtime.mjs"
+      - "!scripts/audit-runtime.test.mjs"
       - "app/**"
       - "hardhat.config.ts"
       - "tsconfig.json"
@@ -22,6 +24,8 @@ on:
       - "test/**"
       - "ignition/**"
       - "scripts/**"
+      - "!scripts/audit-runtime.mjs"
+      - "!scripts/audit-runtime.test.mjs"
       - "app/**"
       - "hardhat.config.ts"
       - "tsconfig.json"
@@ -64,5 +68,3 @@ jobs:
       - run: npm --prefix app test
       - run: npm --prefix app run check
       - run: npm --prefix app run build
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm --prefix app audit --omit=dev --audit-level=high

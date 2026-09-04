@@ -73,6 +73,15 @@ export function saveTranscript(storage, transcript, account) {
   return valid;
 }
 
+export function discardQueuedTranscript(transcript, onchainPly) {
+  if (!uint(onchainPly, 0xffffffff)) throw new Error('Invalid transcript ply');
+  const valid = validateTranscript(transcript);
+  return validateTranscript({
+    ...valid,
+    moves: valid.moves.filter((move) => Number(move.ply) < Number(onchainPly))
+  });
+}
+
 export function pruneTranscriptBeforePly(transcript, ply) {
   if (!uint(ply, 0xffffffff)) throw new Error('Invalid transcript ply');
   const valid = validateTranscript(transcript);

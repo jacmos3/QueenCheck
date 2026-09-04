@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TRANSCRIPT_BYTES, mergeTranscripts, parseTranscriptJson, pruneTranscriptBeforePly, saveQueuedTranscriptMove, saveTranscript, storageKey, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '../src/lib/transcript.js';
+import { discardQueuedTranscript, MAX_TRANSCRIPT_BYTES, mergeTranscripts, parseTranscriptJson, pruneTranscriptBeforePly, saveQueuedTranscriptMove, saveTranscript, storageKey, TRANSCRIPT_SCHEMA, validateTranscriptContinuation } from '../src/lib/transcript.js';
 import { nextTranscriptRoot } from '../src/lib/eip712.js';
 
 const game = '0x1111111111111111111111111111111111111111';
@@ -60,6 +60,34 @@ test('failed current-move persistence leaves stale caller state unchanged', () =
     current = saveQueuedTranscriptMove(storage, current, 4, currentMove, player);
   }, /quota exceeded/);
   assert.strictEqual(current, original);
+});
+
+test('discarding queued moves persists an empty scoped transcript', () => {
+  const memory = new Map();
+  const storage = { setItem: (key, value) => memory.set(key, value) };
+  const original = transcript([move(0, h0, h1)]);
+  const discarded = saveTranscript(storage, discardQueuedTranscript(original, 0), player);
+  assert.deepEqual(discarded.moves, []);
+  assert.deepEqual(JSON.parse([...memory.values()][0]).moves, []);
+  assert.equal(original.moves.length, 1);
+});
+
+test('failed discard persistence leaves caller transcript unchanged', () => {
+  const original = transcript([move(0, h0, h1)]);
+  const storage = { setItem: () => { throw new Error('quota exceeded'); } };
+  let current = original;
+  assert.throws(() => {
+    current = saveTranscript(storage, discardQueuedTranscript(current, 0), player);
+  }, /quota exceeded/);
+  assert.strictEqual(current, original);
+  assert.equal(current.moves.length, 1);
+});
+
+test('discarding queued moves preserves transcript entries before the onchain ply', () => {
+  const original = transcript([move(0, h0, h1), move(1, h1, h2)]);
+  const discarded = discardQueuedTranscript(original, 1);
+  assert.deepEqual(discarded.moves.map(({ ply }) => ply), [0]);
+  assert.deepEqual(original.moves.map(({ ply }) => ply), [0, 1]);
 });
 
 test('stale histories are pruned before merging current imported moves', () => {
