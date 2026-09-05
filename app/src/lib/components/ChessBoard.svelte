@@ -39,7 +39,12 @@
         disabled={disabled}
         on:click={() => onselect(index)}
       >
-        <span class="piece" aria-hidden="true">{pieceSymbol(board[index])}</span>
+        <span
+          class="piece"
+          class:white={Number(board[index]) > 0}
+          class:black={Number(board[index]) < 0}
+          aria-hidden="true"
+        >{pieceSymbol(board[index])}</span>
         {#if legal.has(index) && !board[index]}<span class="legal-dot" aria-hidden="true"></span>{/if}
         <small>{indexToAlgebraic(index)}</small>
       </button>

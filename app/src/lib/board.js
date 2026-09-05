@@ -10,7 +10,10 @@ export const START_BOARD = Object.freeze((() => {
   }
   return board;
 })());
-const symbols = Object.freeze({ 1: '♙', 2: '♘', 3: '♗', 4: '♖', 5: '♕', 6: '♔', '-1': '♟', '-2': '♞', '-3': '♝', '-4': '♜', '-5': '♛', '-6': '♚' });
+const symbols = Object.freeze({
+  1: '♟', 2: '♞', 3: '♝', 4: '♜', 5: '♛', 6: '♚',
+  '-1': '♟', '-2': '♞', '-3': '♝', '-4': '♜', '-5': '♛', '-6': '♚'
+});
 const fenPieces = Object.freeze({ 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K', '-1': 'p', '-2': 'n', '-3': 'b', '-4': 'r', '-5': 'q', '-6': 'k' });
 
 export function squareIndex(row, col) {

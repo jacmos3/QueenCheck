@@ -82,6 +82,23 @@
   $: turnLabel = game.status !== 1
     ? (statusLabels[game.status] ?? `State ${game.status}`)
     : `${sideToMoveWhite ? 'White' : 'Black'} to move${queued.length ? ' · local queue' : ''}`;
+  $: blackSeat = {
+    color: 'Black',
+    name: game.black && game.black !== zeroAddress ? shortAddress(game.black) : (game.invited && game.invited !== zeroAddress ? `Invited ${shortAddress(game.invited)}` : 'Open seat'),
+    title: game.black,
+    active: !sideToMoveWhite && game.status === 1
+  };
+  $: whiteSeat = {
+    color: 'White',
+    name: shortAddress(game.white),
+    title: game.white,
+    active: sideToMoveWhite && game.status === 1
+  };
+  $: farSeat = flipped ? whiteSeat : blackSeat;
+  $: nearSeat = flipped ? blackSeat : whiteSeat;
+  $: clockFace = game.moveTimeout && game.status === 1
+    ? { time: clockLabel || '0:00', note: game.timeoutFinalizeAfter ? 'Grace' : 'To move' }
+    : { time: '∞', note: game.status === 1 ? 'Untimed' : (statusLabels[game.status] ?? 'Ready') };
 
   onMount(() => {
     const tick = setInterval(() => { now = Date.now(); }, 1000);
@@ -677,24 +694,17 @@
     {/if}
     <div class="game-grid">
       <div class="table-column">
-        <div class="player-strip">
-          <div class="seat" class:to-move={!sideToMoveWhite && game.status === 1}>
-            <span>Black</span>
-            <strong title={game.black}>{game.black && game.black !== zeroAddress ? shortAddress(game.black) : (game.invited && game.invited !== zeroAddress ? `Invited ${shortAddress(game.invited)}` : 'Open seat')}</strong>
+        <div class="player-row" class:to-move={farSeat.active}>
+          <div class="who">
+            <span>{farSeat.color}</span>
+            <strong title={farSeat.title}>{farSeat.name}</strong>
           </div>
-          <div class="clock-chip">
-            {#if game.moveTimeout && game.status === 1}
-              <span>{clockLabel || '0:00'}</span>
-              <small>{game.timeoutFinalizeAfter ? 'Grace' : 'To move'}</small>
-            {:else}
-              <span>∞</span>
-              <small>Untimed</small>
-            {/if}
-          </div>
-          <div class="seat" class:to-move={sideToMoveWhite && game.status === 1}>
-            <span>White</span>
-            <strong title={game.white}>{shortAddress(game.white)}</strong>
-          </div>
+          {#if farSeat.active}
+            <div class="clock-chip live">
+              <span>{clockFace.time}</span>
+              <small>{clockFace.note}</small>
+            </div>
+          {/if}
         </div>
         <ChessBoard
           board={displayBoard}
@@ -707,6 +717,18 @@
           disabled={busy || !session || game.status !== 1}
           onselect={selectSquare}
         />
+        <div class="player-row" class:to-move={nearSeat.active}>
+          <div class="who">
+            <span>{nearSeat.color}</span>
+            <strong title={nearSeat.title}>{nearSeat.name}</strong>
+          </div>
+          {#if nearSeat.active}
+            <div class="clock-chip live">
+              <span>{clockFace.time}</span>
+              <small>{clockFace.note}</small>
+            </div>
+          {/if}
+        </div>
         {#if session && game.status === 1}
           <div class="play-bar">
             <div class="segmented">

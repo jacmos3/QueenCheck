@@ -5,10 +5,10 @@
   import { loadPublicGameDirectory } from '$lib/game-discovery.js';
 
   const filters = [
-    { value: 'all', label: 'Recent' },
+    { value: 'all', label: 'All' },
     { value: 'open', label: 'Open' },
-    { value: 'active', label: 'In progress' },
-    { value: 'completed', label: 'Completed' }
+    { value: 'active', label: 'Playing' },
+    { value: 'completed', label: 'Done' }
   ];
 
   let games = [];
@@ -88,43 +88,9 @@
   }
 </script>
 
-<section class="match-explorer" id="matches" aria-labelledby="matches-heading" aria-busy={loading}>
-  <div class="section-heading">
-    <div>
-      <span class="eyebrow">Public tables</span>
-      <h2 id="matches-heading">Look in before you sit.</h2>
-      <p>Confirmed Base Sepolia games, no wallet required. Connect only when you want a seat.</p>
-    </div>
-    <button class="secondary refresh-button" type="button" on:click={refresh} disabled={loading}>
-      {loading ? 'Reading chain…' : 'Refresh'}
-    </button>
-  </div>
-
-  <div class="activity-summary" aria-label="Match activity summary">
-    <div><strong>{totalCreated}</strong><span>Total created</span></div>
-    <div><strong>{counts.open}</strong><span>Open in view</span></div>
-    <div><strong>{counts.active}</strong><span>Playing now</span></div>
-    <div><strong>{counts.completed}</strong><span>Completed in view</span></div>
-  </div>
-
-  <form class="game-lookup" on:submit|preventDefault={openGame} novalidate>
-    <label for="game-address">Already have a game address?</label>
-    <div class="lookup-row">
-      <input
-        id="game-address"
-        bind:value={gameAddress}
-        inputmode="text"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="0x…"
-        aria-describedby={addressError ? 'game-address-error' : undefined}
-      />
-      <button type="submit">Open board</button>
-    </div>
-    {#if addressError}<p class="form-error compact-message" id="game-address-error" role="alert">{addressError}</p>{/if}
-  </form>
-
-  <div class="match-toolbar">
+<section class="lobby-tables" id="matches" aria-labelledby="matches-heading" aria-busy={loading}>
+  <div class="lobby-tables-bar">
+    <h2 id="matches-heading">Tables</h2>
     <div class="match-filters" aria-label="Filter public matches">
       {#each filters as item}
         <button
@@ -135,41 +101,59 @@
         >{item.label}<span>{counts[item.value]}</span></button>
       {/each}
     </div>
-    {#if confirmedThrough}<small>Confirmed through block {blockLabel(confirmedThrough)}</small>{/if}
+    <button class="ghost compact-action refresh-button" type="button" on:click={refresh} disabled={loading}>
+      {loading ? 'Reading…' : 'Refresh'}
+    </button>
   </div>
 
   {#if error}
     <div class="panel explorer-state" role="alert">
-      <strong>Could not read the public match list.</strong>
+      <strong>Could not read the public tables.</strong>
       <p>{error}</p>
       <button class="secondary" type="button" on:click={refresh}>Try again</button>
     </div>
   {:else if loading && !games.length}
-    <div class="match-loading" aria-label="Loading public matches">
-      {#each Array(3) as _}<div class="match-card placeholder-card"></div>{/each}
+    <div class="table-rows" aria-label="Loading public matches">
+      {#each Array(4) as _}<div class="table-row placeholder-card"></div>{/each}
     </div>
   {:else if !visibleGames.length}
     <div class="panel explorer-state">
-      <strong>{games.length ? `No ${filters.find((item) => item.value === filter)?.label.toLowerCase()} matches in the current view.` : searchTruncated ? 'No matches found in the recent indexed window.' : 'No confirmed matches yet.'}</strong>
-      <p>{games.length ? 'Choose another filter or refresh the onchain snapshot.' : searchTruncated ? 'Older matches exist but are outside this bounded public-RPC search. Open one directly with its game address.' : 'Connect a wallet below to create the first public QueenCheck match.'}</p>
+      <strong>{games.length ? `No ${filters.find((item) => item.value === filter)?.label.toLowerCase()} tables in view.` : searchTruncated ? 'No matches in the recent indexed window.' : 'No confirmed tables yet.'}</strong>
+      <p>{games.length ? 'Pick another filter or refresh.' : searchTruncated ? 'Older matches exist outside this bounded public-RPC search. Open one with its address.' : 'Open a table above to post the first public match.'}</p>
     </div>
   {:else}
-    <div class="match-list">
+    <ol class="table-rows">
       {#each visibleGames as game}
-        <a class="match-card" href={`/game/${game.address}`} aria-label={`Open game ${game.gameId} in spectator mode`}>
-          <div class="match-card-top">
+        <li>
+          <a class="table-row" href={`/game/${game.address}`} aria-label={`Open game ${game.gameId}`}>
             <span class={`status-chip status-${game.group}`}>{game.statusLabel}</span>
-            <strong>Game #{game.gameId}</strong>
-          </div>
-          <div class="match-players">
-            <span><small>White</small><code title={game.white}>{shortAddress(game.white)}</code></span>
-            <span class="versus">vs</span>
-            <span><small>Black</small><code title={game.hasBlackPlayer ? game.black : game.invited}>{opponent(game)}</code></span>
-          </div>
-          <div class="match-meta"><span>{game.ply} {game.ply === 1 ? 'ply' : 'plies'}</span><span>Created at block {blockLabel(game.createdBlock)}</span><span>View board →</span></div>
-        </a>
+            <span class="table-id">#{game.gameId}</span>
+            <span class="table-players">
+              <code title={game.white}>{shortAddress(game.white)}</code>
+              <span class="versus">vs</span>
+              <code title={game.hasBlackPlayer ? game.black : game.invited}>{opponent(game)}</code>
+            </span>
+            <span class="table-ply">{game.ply} ply</span>
+          </a>
+        </li>
       {/each}
-    </div>
-    {#if hasMore}<p class="list-note">Showing the latest {games.length} verified matches. {searchTruncated ? 'Older activity is outside this bounded public-RPC search.' : 'New and older matches may not be in this snapshot.'}</p>{/if}
+    </ol>
+    {#if hasMore}<p class="list-note">Latest {games.length} verified matches{searchTruncated ? '; older activity is outside this public-RPC window' : ''}.</p>{/if}
   {/if}
+
+  <form class="table-lookup" on:submit|preventDefault={openGame} novalidate>
+    <label class="sr-only" for="game-address">Game address</label>
+    <input
+      id="game-address"
+      bind:value={gameAddress}
+      inputmode="text"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="Paste a game address"
+      aria-describedby={addressError ? 'game-address-error' : undefined}
+    />
+    <button class="compact-action" type="submit">Sit</button>
+    {#if addressError}<p class="form-error compact-message" id="game-address-error" role="alert">{addressError}</p>{/if}
+  </form>
+  {#if confirmedThrough}<p class="list-note">Confirmed through block {blockLabel(confirmedThrough)} · {totalCreated} created</p>{/if}
 </section>

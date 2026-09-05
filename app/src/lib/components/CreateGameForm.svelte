@@ -54,8 +54,7 @@
   async function copyAddress() { await navigator.clipboard.writeText(gameAddress); }
 </script>
 
-<form class="panel create-form" on:submit|preventDefault={createGame}>
-  <div><span class="eyebrow">New table</span><h2>Set the pieces.</h2></div>
+<form class="create-form" on:submit|preventDefault={createGame}>
   <label>Opponent address <small>optional — leave empty for an open challenge</small>
     <input bind:value={opponent} autocomplete="off" placeholder="0x…" />
   </label>
