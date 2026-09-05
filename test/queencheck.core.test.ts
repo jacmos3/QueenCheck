@@ -75,6 +75,16 @@ describe("QueenCheck protocol", { concurrency: false }, async () => {
     return { game: await viem.getContractAt("QueenCheckGame", predicted), userSalt };
   }
 
+  async function activeHarnessGame() {
+    const system = await deployHarnessSystem();
+    const { game } = await createGame(system);
+    await game.write.join({ account: black.account });
+    return {
+      ...system,
+      game: await viem.getContractAt("QueenCheckGameHarness", game.address),
+    };
+  }
+
   async function activeGame(timeout = 0) {
     const system = await deploySystem();
     const { game } = await createGame(system, black.account.address, timeout);
@@ -607,6 +617,39 @@ describe("QueenCheck protocol", { concurrency: false }, async () => {
     await reset.write.play([52, 36, 0], { account: white.account });
     assert.equal(await reset.read.halfmoveClock(), 0);
     assert.equal(await reset.read.status(), 1);
+  });
+
+  it("applies stalemate, insufficient material, and mate-over-75-move through play", async () => {
+    const stalemate = await activeHarnessGame();
+    const stalemateBoard = emptyBoard();
+    stalemateBoard[0][0] = -6; // black king a8
+    stalemateBoard[2][2] = 6;  // white king c6
+    stalemateBoard[3][2] = 5;  // white queen c5
+    await stalemate.game.write.setTestPosition([stalemateBoard, true, 0, -1, 0, 12]);
+    await stalemate.game.write.play([26, 17, 0], { account: white.account }); // Qc5-b6
+    assert.equal(await stalemate.game.read.status(), 2);
+    assert.equal(await stalemate.game.read.ply(), 1);
+
+    const material = await activeHarnessGame();
+    const materialBoard = emptyBoard();
+    materialBoard[7][4] = 6;  // white king e1
+    materialBoard[5][3] = 2;  // white knight d3
+    materialBoard[4][4] = -6; // black king e4
+    await material.game.write.setTestPosition([materialBoard, false, 0, -1, 0, 7]);
+    await material.game.write.play([36, 43, 0], { account: black.account }); // Ke4xd3
+    const remaining = [...await material.game.read.getBoard()].map(Number).filter((piece) => piece !== 0);
+    assert.deepEqual(remaining.sort((left, right) => left - right), [-6, 6]);
+    assert.equal(await material.game.read.status(), 2);
+
+    const mate = await activeHarnessGame();
+    const mateBoard = emptyBoard();
+    mateBoard[0][0] = -6; // black king a8
+    mateBoard[2][1] = 6;  // white king b6
+    mateBoard[3][2] = 4;  // white rook c5
+    await mate.game.write.setTestPosition([mateBoard, true, 0, -1, 0, 149]);
+    await mate.game.write.play([26, 2, 0], { account: white.account }); // Rc5-c8
+    assert.equal(await mate.game.read.halfmoveClock(), 150);
+    assert.equal(await mate.game.read.status(), 3);
   });
 
   it("detects Fool's mate and refuses post-terminal moves", async () => {
