@@ -1,10 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { boardToFen, indexToAlgebraic, squareIndex } from '../src/lib/board.js';
+import { algebraicToIndex, boardToFen, indexToAlgebraic, kingSquare, squareIndex, START_BOARD } from '../src/lib/board.js';
 
 test('contract board mapping is row-major', () => {
   assert.equal(squareIndex(0, 0), 0); assert.equal(squareIndex(7, 7), 63);
   assert.equal(indexToAlgebraic(0), 'a8'); assert.equal(indexToAlgebraic(63), 'h1');
+  assert.equal(algebraicToIndex('a8'), 0); assert.equal(algebraicToIndex('h1'), 63);
+  assert.equal(algebraicToIndex('e2'), 52);
+  assert.throws(() => algebraicToIndex('e9'));
+});
+
+test('starting board matches QueenCheck row-major setup', () => {
+  assert.equal(START_BOARD.length, 64);
+  assert.equal(START_BOARD[0], -4); assert.equal(START_BOARD[4], -6);
+  assert.equal(START_BOARD[60], 6); assert.equal(START_BOARD[63], 4);
+  assert.equal(kingSquare(START_BOARD, true), 60);
+  assert.equal(kingSquare(START_BOARD, false), 4);
 });
 
 test('signed pieces convert to a chess.js compatible FEN', () => {

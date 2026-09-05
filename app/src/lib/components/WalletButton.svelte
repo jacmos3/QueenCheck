@@ -38,11 +38,20 @@
     catch (cause) { error = cause instanceof Error ? cause.message : 'Wallet connection failed'; }
     finally { if (generation === connectionGeneration) busy = false; }
   }
+
+  function disconnect() {
+    connectionGeneration += 1;
+    busy = false;
+    session = null;
+    error = '';
+    ondisconnect();
+  }
 </script>
 
 <div class="wallet-control">
   {#if session}
     <span class="wallet-pill" title={session.account}>{session.account.slice(0, 6)}…{session.account.slice(-4)} · {session.chain.name}</span>
+    <button class="ghost compact-action" type="button" on:click={disconnect}>Disconnect</button>
   {:else}
     <button class="secondary" on:click={connect} disabled={busy}>{busy ? 'Connecting…' : 'Connect wallet'}</button>
   {/if}

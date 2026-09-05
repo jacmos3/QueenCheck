@@ -55,14 +55,14 @@
 </script>
 
 <form class="panel create-form" on:submit|preventDefault={createGame}>
-  <div><span class="eyebrow">New match</span><h2>Create a verifiable game</h2></div>
+  <div><span class="eyebrow">New table</span><h2>Set the pieces.</h2></div>
   <label>Opponent address <small>optional — leave empty for an open challenge</small>
     <input bind:value={opponent} autocomplete="off" placeholder="0x…" />
   </label>
   <label>Turn timeout in minutes <small>0 disables the timeout</small>
     <input bind:value={timeoutMinutes} min="0" max="43200" step="1" type="number" />
   </label>
-  <button disabled={busy}>{busy ? 'Creating…' : 'Create game'}</button>
+  <button disabled={busy}>{busy ? 'Opening table…' : 'Open table'}</button>
   {#if error}<p class="form-error" role="alert">{error}</p>{/if}
   {#if gameAddress}
     <div class="success"><strong>Game created</strong><code>{gameAddress}</code><div class="button-row"><a class="button" href={`/game/${gameAddress}`}>Open game</a><button class="ghost" type="button" on:click={copyAddress}>Copy address</button></div></div>

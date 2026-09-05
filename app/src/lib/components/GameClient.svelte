@@ -1,11 +1,11 @@
 <script>
   import { env } from '$env/dynamic/public';
   import { Chess } from 'chess.js';
-  import { ContractFunctionRevertedError, getAddress } from 'viem';
+  import { ContractFunctionRevertedError, getAddress, zeroAddress } from 'viem';
   import { onMount } from 'svelte';
   import ChessBoard from './ChessBoard.svelte';
   import WalletButton from './WalletButton.svelte';
-  import { boardToFen, chessToSignedBoard, EMPTY_BOARD, indexToAlgebraic } from '$lib/board.js';
+  import { algebraicToIndex, boardToFen, chessToSignedBoard, EMPTY_BOARD, indexToAlgebraic, kingSquare, shortAddress } from '$lib/board.js';
   import { assertTrustedDeployment } from '$lib/deployment.js';
   import { factoryAbi, gameAbi, recordAbi } from '$lib/contracts/abi.js';
   import { moveTypedData, nextTranscriptRoot } from '$lib/eip712.js';
@@ -39,8 +39,10 @@
   let board = [...EMPTY_BOARD];
   let displayBoard = [...EMPTY_BOARD];
   let displayChess = null;
+  let lastLiveMove = null;
+  let now = Date.now();
   let game = {
-    white: '', black: '', status: 0, whiteTurn: true, ply: 0, gameId: '0', rulesetId: '',
+    white: '', black: '', invited: '', status: 0, whiteTurn: true, ply: 0, gameId: '0', rulesetId: '',
     stateHash: '', transcriptRoot: '', castlingFlags: 0, enPassantCol: -1,
     enPassantRow: 0, halfmoveClock: 0, moveTimeout: 0, turnDeadline: 0, timeoutFinalizeAfter: 0, drawOfferer: ''
   };
@@ -57,14 +59,51 @@
   $: canCancelDraw = isPlayer && game.status === 1 && game.drawOfferer && game.drawOfferer.toLowerCase() === session.account.toLowerCase();
   $: canClaimFifty = isPlayer && game.status === 1 && game.halfmoveClock >= 100 && onchainPlayer && session.account.toLowerCase() === onchainPlayer.toLowerCase();
   $: recordActions = matchRecordAvailability(game, session?.account, recordClaimed, recordOwner);
+  $: flipped = Boolean(session && game.black && session.account.toLowerCase() === game.black.toLowerCase());
+  $: sideToMoveWhite = queued.length % 2 === 0 ? game.whiteTurn : !game.whiteTurn;
+  $: lastMove = queued.length
+    ? { from: Number(queued.at(-1).fromSquare), to: Number(queued.at(-1).toSquare) }
+    : lastLiveMove;
+  $: legalSquares = selected == null || !displayChess
+    ? []
+    : displayChess.moves({ square: indexToAlgebraic(selected), verbose: true }).map((move) => algebraicToIndex(move.to));
+  $: checkSquare = displayChess?.inCheck() ? kingSquare(displayBoard, displayChess.turn() === 'w') : null;
+  $: canJoin = Boolean(
+    session && game.status === 0 && game.white &&
+    session.account.toLowerCase() !== game.white.toLowerCase() &&
+    (!game.invited || game.invited === zeroAddress || session.account.toLowerCase() === game.invited.toLowerCase())
+  );
+  $: canSignalTimeout = Boolean(
+    isPlayer && game.status === 1 && game.moveTimeout && onchainPlayer &&
+    session.account.toLowerCase() !== onchainPlayer.toLowerCase() && !Number(game.timeoutFinalizeAfter)
+  );
+  $: canFinalizeTimeout = Boolean(Number(game.timeoutFinalizeAfter) && now / 1000 >= Number(game.timeoutFinalizeAfter));
+  $: clockLabel = formatClock(game.turnDeadline, now);
+  $: turnLabel = game.status !== 1
+    ? (statusLabels[game.status] ?? `State ${game.status}`)
+    : `${sideToMoveWhite ? 'White' : 'Black'} to move${queued.length ? ' · local queue' : ''}`;
 
   onMount(() => {
+    const tick = setInterval(() => { now = Date.now(); }, 1000);
     void refresh(null, sessionGeneration);
     return () => {
+      clearInterval(tick);
       refreshGeneration += 1;
       sessionGeneration += 1;
     };
   });
+
+  function formatClock(deadline, timestamp) {
+    const seconds = Number(deadline);
+    if (!seconds) return '';
+    const remaining = Math.max(0, seconds * 1000 - timestamp);
+    const total = Math.floor(remaining / 1000);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    return `${minutes}:${String(secs).padStart(2, '0')}`;
+  }
 
   function friendly(cause) {
     if (!cause || typeof cause !== 'object') return 'Operation failed';
@@ -153,11 +192,11 @@
       if (!code || code === '0x') throw new Error('No contract bytecode exists at this address.');
       if (!registered) throw new Error('This contract is not registered by the configured QueenCheck factory.');
       const normalizedRecord = trustedDeployment.record;
-      const [white, black, status, whiteTurn, ply, gameId, rulesetId, stateHash, transcriptRoot, castlingFlags, enPassantCol, enPassantRow, halfmoveClock, moveTimeout, turnDeadline, timeoutFinalizeAfter, drawOfferer, rawBoard] = await Promise.all([
-        ...['whitePlayer', 'blackPlayer', 'status', 'whiteTurn', 'ply', 'gameId', 'rulesetId', 'stateHash', 'transcriptRoot', 'castlingFlags', 'enPassantCol', 'enPassantRow', 'halfmoveClock', 'moveTimeout', 'turnDeadline', 'timeoutFinalizeAfter', 'drawOfferer', 'getBoard'].map((functionName) => reader.publicClient.readContract({ address, abi: gameAbi, functionName }))
+      const [white, black, invited, status, whiteTurn, ply, gameId, rulesetId, stateHash, transcriptRoot, castlingFlags, enPassantCol, enPassantRow, halfmoveClock, moveTimeout, turnDeadline, timeoutFinalizeAfter, drawOfferer, rawBoard] = await Promise.all([
+        ...['whitePlayer', 'blackPlayer', 'invitedPlayer', 'status', 'whiteTurn', 'ply', 'gameId', 'rulesetId', 'stateHash', 'transcriptRoot', 'castlingFlags', 'enPassantCol', 'enPassantRow', 'halfmoveClock', 'moveTimeout', 'turnDeadline', 'timeoutFinalizeAfter', 'drawOfferer', 'getBoard'].map((functionName) => reader.publicClient.readContract({ address, abi: gameAbi, functionName }))
       ]);
       const nextGame = {
-        white, black, status: Number(status), whiteTurn, ply: Number(ply), gameId: String(gameId),
+        white, black, invited, status: Number(status), whiteTurn, ply: Number(ply), gameId: String(gameId),
         rulesetId, stateHash, transcriptRoot, castlingFlags: Number(castlingFlags),
         enPassantCol: Number(enPassantCol), enPassantRow: Number(enPassantRow),
         halfmoveClock: Number(halfmoveClock), moveTimeout: Number(moveTimeout),
@@ -226,6 +265,12 @@
     resetMessage();
     if (!verified || busy || game.status !== 1) return;
     if (selected === null) { if (displayBoard[index]) selected = index; return; }
+    if (index === selected) { selected = null; return; }
+    if (displayBoard[index] && Number(displayBoard[index]) * Number(displayBoard[selected]) > 0) {
+      selected = index;
+      return;
+    }
+    if (!legalSquares.includes(index)) { selected = null; return; }
     const from = selected; selected = null;
     const snapshot = session;
     const generation = sessionGeneration;
@@ -243,7 +288,8 @@
         if (queued.length) throw new Error('Archive the queued offline moves before returning to live play.');
         const currentPlayer = game.whiteTurn ? game.white : game.black;
         if (!session || session.account.toLowerCase() !== currentPlayer.toLowerCase()) throw new Error(`The current move belongs to ${currentPlayer}.`);
-        await sendWrite('play', [from, index, promotionValue], 'Move confirmed. The onchain SVG is now updated.');
+        const played = await sendWrite('play', [from, index, promotionValue], 'Move confirmed. The onchain SVG is now updated.');
+        if (played) lastLiveMove = { from, to: index };
       } else {
         await signOfflineMove(from, index, promotionValue);
       }
@@ -611,30 +657,133 @@
 </script>
 
 <section class="game-shell">
-  <div class="game-heading"><div><a href="/">← Home</a><span class="eyebrow">Verified match</span><h1>Game {address.slice(0, 8)}…{address.slice(-6)}</h1></div><WalletButton bind:session onconnect={connected} ondisconnect={disconnected} /></div>
-  {#if loading}<p class="status-box">Verifying bytecode and factory registration…</p>{/if}
+  <div class="game-heading">
+    <div>
+      <a href="/">← Tables</a>
+      <span class="eyebrow">Match #{game.gameId === '0' ? '…' : game.gameId}</span>
+      <h1>{turnLabel}</h1>
+    </div>
+    <WalletButton bind:session onconnect={connected} ondisconnect={disconnected} />
+  </div>
+  {#if loading}<p class="status-box">Checking the onchain board…</p>{/if}
   {#if error}<p class="form-error status-box" role="alert">{error}</p>{/if}
   {#if notice}<p class="success status-box" role="status">{notice}</p>{/if}
   {#if verified}
-    {#if !session}<div class="spectator-banner" role="status"><span><strong>Verified spectator mode.</strong> This board and state were read from Base Sepolia without requesting wallet access.</span><button class="secondary" type="button" on:click={() => refresh(null, sessionGeneration)} disabled={loading}>Refresh state</button></div>{/if}
+    {#if !session}
+      <div class="spectator-banner" role="status">
+        <span><strong>Watching.</strong> This position is read from Base Sepolia. Connect only if you want to sit down and move.</span>
+        <button class="secondary" type="button" on:click={() => refresh(null, sessionGeneration)} disabled={loading}>Refresh</button>
+      </div>
+    {/if}
     <div class="game-grid">
-      <ChessBoard board={displayBoard} {selected} disabled={busy || !session} onselect={selectSquare} />
-      <aside class="game-sidebar">
-        <div class="panel compact"><div class="stat-row"><span>Status</span><strong>{statusLabels[game.status] ?? `State ${game.status}`}</strong></div><div class="stat-row"><span>Ply</span><strong>{game.ply}</strong></div><div class="stat-row"><span>White</span><code>{game.white}</code></div><div class="stat-row"><span>Black</span><code>{game.black}</code></div><div class="stat-row"><span>State hash</span><code>{game.stateHash}</code></div><div class="stat-row"><span>Transcript root</span><code>{game.transcriptRoot}</code></div></div>
-        {#if session}
-          <div class="panel compact">
-            <h2>Move mode</h2><div class="segmented"><button class:active={mode === 'live'} on:click={() => mode = 'live'}>Live</button><button class:active={mode === 'offline'} on:click={() => mode = 'offline'}>Offline</button></div>
-            <p>{mode === 'live' ? 'Each move is sent onchain immediately and updates the SVG.' : 'Moves are signed locally. Nothing is archived until checkpoint is submitted.'}</p>
-            <label>Promotion<select bind:value={promotion}><option value={5}>Queen</option><option value={4}>Rook</option><option value={3}>Bishop</option><option value={2}>Knight</option></select></label>
+      <div class="table-column">
+        <div class="player-strip">
+          <div class="seat" class:to-move={!sideToMoveWhite && game.status === 1}>
+            <span>Black</span>
+            <strong title={game.black}>{game.black && game.black !== zeroAddress ? shortAddress(game.black) : (game.invited && game.invited !== zeroAddress ? `Invited ${shortAddress(game.invited)}` : 'Open seat')}</strong>
           </div>
-          <div class="panel compact"><h2>Game actions</h2><div class="button-grid"><button on:click={() => sendWrite('join')} disabled={busy || game.status !== 0}>Join / accept</button><button class="secondary" on:click={() => sendWrite('cancel')} disabled={busy || game.status !== 0 || game.white.toLowerCase() !== session.account.toLowerCase()}>Cancel</button><button class="secondary" on:click={() => sendWrite('resign')} disabled={busy || game.status !== 1 || !isPlayer}>Resign</button><button class="secondary" on:click={() => sendWrite('offerDraw')} disabled={busy || game.status !== 1 || !isPlayer}>Offer draw</button><button class="secondary" on:click={() => sendWrite('cancelDrawOffer')} disabled={busy || !canCancelDraw}>Cancel draw offer</button><button class="secondary" on:click={() => sendWrite('acceptDraw')} disabled={busy || game.status !== 1 || !isPlayer || !game.drawOfferer || game.drawOfferer.toLowerCase() === session.account.toLowerCase()}>Accept draw</button><button class="secondary" on:click={() => sendWrite('claimThreefold')} disabled={busy || !canClaimThreefold}>Claim threefold</button><button class="secondary" on:click={() => sendWrite('claimFiftyMove')} disabled={busy || !canClaimFifty}>Claim 50-move draw</button><button class="secondary" on:click={() => sendWrite('signalTimeout')} disabled={busy || game.status !== 1 || !isPlayer || !game.moveTimeout}>Signal timeout</button><button class="secondary" on:click={() => sendWrite('finalizeTimeout')} disabled={busy || !game.timeoutFinalizeAfter}>Finalize timeout</button></div>{#if game.moveTimeout}<p>Turn deadline: {new Date(game.turnDeadline * 1000).toLocaleString()}. {game.timeoutFinalizeAfter ? `Grace ends ${new Date(game.timeoutFinalizeAfter * 1000).toLocaleString()}.` : ''}</p>{/if}</div>
-          <div class="panel compact"><h2>Offline transcript <span class="count">{queued.length}</span></h2><p>Up to 16 signed moves per checkpoint. A different player/browser must import this file and add its own signature; QueenCheck does not claim automatic P2P sync.</p><div class="button-row"><button class="secondary" on:click={exportTranscript}>Export JSON</button><button class="secondary" on:click={discardTranscript} disabled={!queued.length || busy}>Discard queued</button><button on:click={checkpoint} disabled={!queued.length || busy}>Archive {Math.min(queued.length, 16)}</button></div><label>Import signed transcript<textarea bind:value={importText} maxlength="262144" rows="4" placeholder="Paste QueenCheck transcript JSON"></textarea></label><button class="secondary" on:click={importTranscript} disabled={!importText}>Validate & import</button></div>
-          <div class="panel compact"><h2>Signed draw agreement <span class="count">{drawAgreement?.signatures.length ?? 0}/2</span></h2><p>Both players sign the exact current onchain state. Any move makes an old agreement unusable.</p><div class="button-row"><button class="secondary" on:click={signDrawAgreement} disabled={busy || !isPlayer || game.status !== 1 || queued.length}>Sign current state</button><button class="secondary" on:click={exportDrawAgreement} disabled={game.status !== 1}>Export JSON</button><button on:click={submitDrawAgreement} disabled={busy || queued.length || (drawAgreement?.signatures.length ?? 0) !== 2}>Submit draw</button></div><label>Import signed draw agreement<textarea bind:value={drawImportText} maxlength="16384" rows="4" placeholder="Paste QueenCheck draw agreement JSON"></textarea></label><button class="secondary" on:click={importDrawAgreement} disabled={!drawImportText || busy}>Validate & import</button></div>
-          <div class="panel compact record"><h2>Optional match record</h2><p>The record NFT mirrors the latest archived SVG. It is opt-in, soulbound, burnable, and grants no token, prize, revenue, governance, or other economic right. Its address is read from and verified against the configured factory.</p>{#if recordActions.canClaim}<button on:click={claimRecord} disabled={busy || !recordAddress}>Claim record</button>{:else if recordActions.canBurn}<button class="secondary" on:click={burnRecord} disabled={busy || !recordAddress}>Burn record</button>{:else if recordClaimed}<p>This account's record was burned and cannot be claimed again.</p>{/if}</div>
-        {:else}
-          <div class="panel compact"><h2>Read-only view</h2><p>Connect only if you want to join this game or sign an action. Spectating never requests an account or signature.</p></div>
-          <div class="panel compact record"><h2>Optional match record</h2><p>Players can claim a soulbound, burnable record whose SVG follows the latest archived onchain position. It carries no financial rights.</p></div>
+          <div class="clock-chip">
+            {#if game.moveTimeout && game.status === 1}
+              <span>{clockLabel || '0:00'}</span>
+              <small>{game.timeoutFinalizeAfter ? 'Grace' : 'To move'}</small>
+            {:else}
+              <span>∞</span>
+              <small>Untimed</small>
+            {/if}
+          </div>
+          <div class="seat" class:to-move={sideToMoveWhite && game.status === 1}>
+            <span>White</span>
+            <strong title={game.white}>{shortAddress(game.white)}</strong>
+          </div>
+        </div>
+        <ChessBoard
+          board={displayBoard}
+          {selected}
+          {flipped}
+          lastFrom={lastMove?.from ?? null}
+          lastTo={lastMove?.to ?? null}
+          {legalSquares}
+          {checkSquare}
+          disabled={busy || !session || game.status !== 1}
+          onselect={selectSquare}
+        />
+        {#if session && game.status === 1}
+          <div class="play-bar">
+            <div class="segmented">
+              <button type="button" class:active={mode === 'live'} on:click={() => mode = 'live'}>Live</button>
+              <button type="button" class:active={mode === 'offline'} on:click={() => mode = 'offline'}>Offline</button>
+            </div>
+            <label class="promo">Promote to
+              <select bind:value={promotion}>
+                <option value={5}>Queen</option>
+                <option value={4}>Rook</option>
+                <option value={3}>Bishop</option>
+                <option value={2}>Knight</option>
+              </select>
+            </label>
+            <p>{mode === 'live' ? 'Each move is sent onchain.' : 'Sign here, archive up to 16 moves later.'}</p>
+          </div>
         {/if}
+      </div>
+      <aside class="game-sidebar">
+        <div class="panel compact table-card">
+          <p class="turn-copy">{turnLabel}. Ply {game.ply}{checkSquare != null ? ' · check' : ''}.</p>
+          {#if session}
+            <div class="button-grid">
+              <button type="button" on:click={() => sendWrite('join')} disabled={busy || !canJoin}>Sit as Black</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('cancel')} disabled={busy || game.status !== 0 || game.white.toLowerCase() !== session.account.toLowerCase()}>Cancel challenge</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('resign')} disabled={busy || game.status !== 1 || !isPlayer}>Resign</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('offerDraw')} disabled={busy || game.status !== 1 || !isPlayer}>Offer draw</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('cancelDrawOffer')} disabled={busy || !canCancelDraw}>Withdraw offer</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('acceptDraw')} disabled={busy || game.status !== 1 || !isPlayer || !game.drawOfferer || game.drawOfferer.toLowerCase() === session.account.toLowerCase()}>Accept draw</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('claimThreefold')} disabled={busy || !canClaimThreefold}>Threefold</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('claimFiftyMove')} disabled={busy || !canClaimFifty}>50-move</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('signalTimeout')} disabled={busy || !canSignalTimeout}>Flag the clock</button>
+              <button class="secondary" type="button" on:click={() => sendWrite('finalizeTimeout')} disabled={busy || !canFinalizeTimeout}>End on time</button>
+            </div>
+          {:else}
+            <p>Connect to join, move, or resign. Spectating never asks for a signature.</p>
+          {/if}
+        </div>
+        {#if session}
+          <details class="panel compact">
+            <summary>Offline moves <span class="count">{queued.length}</span></summary>
+            <p>Export this file for the other player. Archive up to 16 signed plies at a time.</p>
+            <div class="button-row">
+              <button class="secondary" type="button" on:click={exportTranscript}>Export</button>
+              <button class="secondary" type="button" on:click={discardTranscript} disabled={!queued.length || busy}>Discard queue</button>
+              <button type="button" on:click={checkpoint} disabled={!queued.length || busy}>Archive {Math.min(queued.length, 16)}</button>
+            </div>
+            <label>Import transcript<textarea bind:value={importText} maxlength="262144" rows="3" placeholder="Paste transcript JSON"></textarea></label>
+            <button class="secondary" type="button" on:click={importTranscript} disabled={!importText || busy}>Validate & import</button>
+          </details>
+          <details class="panel compact">
+            <summary>Signed draw <span class="count">{drawAgreement?.signatures.length ?? 0}/2</span></summary>
+            <p>Both players sign this exact position. Any later move voids it.</p>
+            <div class="button-row">
+              <button class="secondary" type="button" on:click={signDrawAgreement} disabled={busy || !isPlayer || game.status !== 1 || queued.length}>Sign</button>
+              <button class="secondary" type="button" on:click={exportDrawAgreement} disabled={game.status !== 1}>Export</button>
+              <button type="button" on:click={submitDrawAgreement} disabled={busy || queued.length || (drawAgreement?.signatures.length ?? 0) !== 2}>Submit</button>
+            </div>
+            <label>Import agreement<textarea bind:value={drawImportText} maxlength="16384" rows="3" placeholder="Paste draw JSON"></textarea></label>
+            <button class="secondary" type="button" on:click={importDrawAgreement} disabled={!drawImportText || busy}>Validate & import</button>
+          </details>
+          <div class="panel compact record">
+            <h2>Match record</h2>
+            <p>Optional, soulbound, burnable. No prize, token, or financial right.</p>
+            {#if recordActions.canClaim}<button type="button" on:click={claimRecord} disabled={busy || !recordAddress}>Claim record</button>
+            {:else if recordActions.canBurn}<button class="secondary" type="button" on:click={burnRecord} disabled={busy || !recordAddress}>Burn record</button>
+            {:else if recordClaimed}<p>This account already burned its record for this game.</p>{/if}
+          </div>
+        {/if}
+        <details class="panel compact">
+          <summary>Onchain proof</summary>
+          <div class="stat-row"><span>Status</span><strong>{statusLabels[game.status] ?? `State ${game.status}`}</strong></div>
+          <div class="stat-row"><span>White</span><code>{game.white}</code></div>
+          <div class="stat-row"><span>Black</span><code>{game.black}</code></div>
+          <div class="stat-row"><span>State hash</span><code>{game.stateHash}</code></div>
+          <div class="stat-row"><span>Transcript</span><code>{game.transcriptRoot}</code></div>
+        </details>
       </aside>
     </div>
   {/if}

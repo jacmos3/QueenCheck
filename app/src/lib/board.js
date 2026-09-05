@@ -1,4 +1,15 @@
 export const EMPTY_BOARD = Object.freeze(Array(64).fill(0));
+const backRank = Object.freeze([4, 2, 3, 5, 6, 3, 2, 4]);
+export const START_BOARD = Object.freeze((() => {
+  const board = Array(64).fill(0);
+  for (let col = 0; col < 8; col += 1) {
+    board[col] = -backRank[col];
+    board[8 + col] = -1;
+    board[48 + col] = 1;
+    board[56 + col] = backRank[col];
+  }
+  return board;
+})());
 const symbols = Object.freeze({ 1: '♙', 2: '♘', 3: '♗', 4: '♖', 5: '♕', 6: '♔', '-1': '♟', '-2': '♞', '-3': '♝', '-4': '♜', '-5': '♛', '-6': '♚' });
 const fenPieces = Object.freeze({ 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K', '-1': 'p', '-2': 'n', '-3': 'b', '-4': 'r', '-5': 'q', '-6': 'k' });
 
@@ -12,6 +23,23 @@ export function indexToAlgebraic(index) {
   const row = Math.floor(index / 8);
   const col = index % 8;
   return `${String.fromCharCode(97 + col)}${8 - row}`;
+}
+
+export function algebraicToIndex(square) {
+  if (typeof square !== 'string' || !/^[a-h][1-8]$/.test(square)) throw new RangeError('Invalid algebraic square');
+  return squareIndex(8 - Number(square[1]), square.charCodeAt(0) - 97);
+}
+
+export function kingSquare(board, white) {
+  if (!Array.isArray(board) || board.length !== 64) return null;
+  const target = white ? 6 : -6;
+  const index = board.findIndex((piece) => Number(piece) === target);
+  return index < 0 ? null : index;
+}
+
+export function shortAddress(address) {
+  if (!address) return 'Open seat';
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 export function pieceSymbol(piece) { return symbols[String(Number(piece))] ?? ''; }

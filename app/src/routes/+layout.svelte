@@ -4,7 +4,14 @@
 
 <header class="site-header">
   <a class="brand" href="/" aria-label="QueenCheck home"><span>♛</span> QueenCheck</a>
-  <span class="domain">queencheck.com</span>
+  <nav class="site-nav" aria-label="Primary">
+    <a href="/#matches">Tables</a>
+    <a href="/#play">Sit down</a>
+    <span class="domain">Base Sepolia</span>
+  </nav>
 </header>
 <main><slot /></main>
-<footer>QueenCheck · verifiable chess · Base Sepolia and local development only</footer>
+<footer>
+  <strong>QueenCheck</strong>
+  <span>Verified chess · no token, prize, or wager · testnet only</span>
+</footer>

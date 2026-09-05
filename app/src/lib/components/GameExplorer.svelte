@@ -91,9 +91,9 @@
 <section class="match-explorer" id="matches" aria-labelledby="matches-heading" aria-busy={loading}>
   <div class="section-heading">
     <div>
-      <span class="eyebrow">Public onchain activity</span>
-      <h2 id="matches-heading">Watch before you connect.</h2>
-      <p>Browse confirmed Base Sepolia matches in read-only mode. A wallet is requested only when you choose to play or sign.</p>
+      <span class="eyebrow">Public tables</span>
+      <h2 id="matches-heading">Look in before you sit.</h2>
+      <p>Confirmed Base Sepolia games, no wallet required. Connect only when you want a seat.</p>
     </div>
     <button class="secondary refresh-button" type="button" on:click={refresh} disabled={loading}>
       {loading ? 'Reading chain…' : 'Refresh'}
@@ -119,7 +119,7 @@
         placeholder="0x…"
         aria-describedby={addressError ? 'game-address-error' : undefined}
       />
-      <button type="submit">Open spectator view</button>
+      <button type="submit">Open board</button>
     </div>
     {#if addressError}<p class="form-error compact-message" id="game-address-error" role="alert">{addressError}</p>{/if}
   </form>
